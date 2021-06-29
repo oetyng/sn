@@ -21,7 +21,7 @@ pub enum Action {
 }
 
 /// An entry in a Register.
-pub type Entry = Vec<u8>;
+pub type Entry = XorName;
 
 /// Address of a Register.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Debug)]

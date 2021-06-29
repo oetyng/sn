@@ -24,7 +24,7 @@ pub enum Action {
 pub type Entries = Vec<Entry>;
 
 /// An entry in a Sequence.
-pub type Entry = Vec<u8>;
+pub type Entry = XorName;
 
 /// Address of a Sequence.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Debug)]

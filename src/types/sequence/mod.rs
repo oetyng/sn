@@ -176,7 +176,7 @@ impl Data {
     }
 
     /// Returns a value at 'index', if present.
-    pub fn get(&self, index: Index, requester: Option<PublicKey>) -> Result<Option<&Vec<u8>>> {
+    pub fn get(&self, index: Index, requester: Option<PublicKey>) -> Result<Option<&XorName>> {
         self.check_permission(Action::Read, requester)?;
 
         Ok(match &self.data {
@@ -357,9 +357,9 @@ mod tests {
         );
 
         // And let's append an item to replica1 with autority1
-        let item1 = b"item1";
+        let item1 = XorName::random();
         let append_op1 = sign_sequence_op(
-            replica1.create_unsigned_append_op(item1.to_vec())?,
+            replica1.create_unsigned_append_op(item1)?,
             &authority_keypair1,
         )?;
         replica1.apply_op(append_op1.clone())?;
@@ -369,9 +369,9 @@ mod tests {
         assert_eq!(replica2.len(None)?, 0);
 
         // Concurrently append anoother item with authority2 on replica2
-        let item2 = b"item2";
+        let item2 = XorName::random();
         let append_op2 = sign_sequence_op(
-            replica2.create_unsigned_append_op(item2.to_vec())?,
+            replica2.create_unsigned_append_op(item2)?,
             &authority_keypair2,
         )?;
         replica2.apply_op(append_op2.clone())?;
@@ -394,24 +394,24 @@ mod tests {
         let mut replicas = create_public_seq_replicas(1);
         let (authority_keypair, sequence) = &mut replicas[0];
 
-        let entry1 = b"value0".to_vec();
-        let entry2 = b"value1".to_vec();
-        let entry3 = b"value2".to_vec();
+        let entry1 = XorName::random();
+        let entry2 = XorName::random();
+        let entry3 = XorName::random();
 
         let op1 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry1.clone())?,
+            sequence.create_unsigned_append_op(entry1)?,
             &authority_keypair,
         )?;
         sequence.apply_op(op1)?;
 
         let op2 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry2.clone())?,
+            sequence.create_unsigned_append_op(entry2)?,
             &authority_keypair,
         )?;
         sequence.apply_op(op2)?;
 
         let op3 = sign_sequence_op(
-            sequence.create_unsigned_append_op(entry3.clone())?,
+            sequence.create_unsigned_append_op(entry3)?,
             &authority_keypair,
         )?;
         sequence.apply_op(op3)?;
@@ -424,13 +424,10 @@ mod tests {
         let end_index = SequenceIndex::FromEnd(0);
 
         let first_entry = sequence.in_range(index_0, index_1, None)?;
-        assert_eq!(first_entry, Some(vec![entry1.clone()]));
+        assert_eq!(first_entry, Some(vec![entry1]));
 
         let all_entries = sequence.in_range(index_0, end_index, None)?;
-        assert_eq!(
-            all_entries,
-            Some(vec![entry1, entry2.clone(), entry3.clone()])
-        );
+        assert_eq!(all_entries, Some(vec![entry1, entry2, entry3]));
 
         let last_entry = sequence.in_range(index_2, end_index, None)?;
         assert_eq!(last_entry, Some(vec![entry3]));
@@ -598,17 +595,17 @@ mod tests {
         );
 
         // let's append to both replicas with one first item
-        let item1 = b"item1";
-        let item2 = b"item2";
+        let item1 = XorName::random();
+        let item2 = XorName::random();
         let append_op1 = sign_sequence_op(
-            replica1.create_unsigned_append_op(item1.to_vec())?,
+            replica1.create_unsigned_append_op(item1)?,
             &authority_keypair1,
         )?;
         replica1.apply_op(append_op1.clone())?;
         check_op_not_allowed_failure(replica2.apply_op(append_op1))?;
 
         let append_op2 = sign_sequence_op(
-            replica2.create_unsigned_append_op(item2.to_vec())?,
+            replica2.create_unsigned_append_op(item2)?,
             &authority_keypair2,
         )?;
         replica1.apply_op(append_op2.clone())?;
@@ -654,17 +651,17 @@ mod tests {
         );
 
         // let's try to append to both sequences
-        let item1 = b"item1";
-        let item2 = b"item2";
+        let item1 = XorName::random();
+        let item2 = XorName::random();
         let append_op1 = sign_sequence_op(
-            replica1.create_unsigned_append_op(item1.to_vec())?,
+            replica1.create_unsigned_append_op(item1)?,
             &authority_keypair1,
         )?;
         replica1.apply_op(append_op1.clone())?;
         check_op_not_allowed_failure(replica2.apply_op(append_op1))?;
 
         let append_op2 = sign_sequence_op(
-            replica2.create_unsigned_append_op(item2.to_vec())?,
+            replica2.create_unsigned_append_op(item2)?,
             &authority_keypair2,
         )?;
         replica1.apply_op(append_op2.clone())?;
@@ -686,13 +683,13 @@ mod tests {
         // since op2 is concurrent to op1, we don't know exactly
         // the order of items appended by op1 and op2 in replica1,
         // thus we assert for either case which are both valid
-        if data == Some(&item1.to_vec()) {
-            assert_eq!(last_entry, Some(&item2.to_vec()));
-            assert_eq!(from_range, Some(vec![item1.to_vec()]));
+        if data == Some(&item1) {
+            assert_eq!(last_entry, Some(&item2));
+            assert_eq!(from_range, Some(vec![item1]));
         } else {
-            assert_eq!(data, Some(&item2.to_vec()));
-            assert_eq!(last_entry, Some(&item1.to_vec()));
-            assert_eq!(from_range, Some(vec![item2.to_vec()]));
+            assert_eq!(data, Some(&item2));
+            assert_eq!(last_entry, Some(&item1));
+            assert_eq!(from_range, Some(vec![item2]));
         }
 
         let data = replica2.get(SequenceIndex::FromStart(0), Some(authority1))?;
@@ -702,9 +699,9 @@ mod tests {
             SequenceIndex::FromStart(1),
             Some(authority1),
         )?;
-        assert_eq!(data, Some(&item2.to_vec()));
-        assert_eq!(last_entry, Some(&item2.to_vec()));
-        assert_eq!(from_range, Some(vec![item2.to_vec()]));
+        assert_eq!(data, Some(&item2));
+        assert_eq!(last_entry, Some(&item2));
+        assert_eq!(from_range, Some(vec![item2]));
 
         // authority2 cannot read from replica1
         check_op_not_allowed_failure(replica1.get(SequenceIndex::FromStart(0), Some(authority2)))?;
@@ -723,9 +720,9 @@ mod tests {
             SequenceIndex::FromStart(1),
             Some(authority2),
         )?;
-        assert_eq!(data, Some(&item2.to_vec()));
-        assert_eq!(last_entry, Some(&item2.to_vec()));
-        assert_eq!(from_range, Some(vec![item2.to_vec()]));
+        assert_eq!(data, Some(&item2));
+        assert_eq!(last_entry, Some(&item2));
+        assert_eq!(from_range, Some(vec![item2]));
 
         Ok(())
     }
@@ -890,12 +887,12 @@ mod tests {
     }
 
     // Generate a Sequence entry
-    fn generate_seq_entry() -> impl Strategy<Value = Vec<u8>> {
-        "\\PC*".prop_map(|s| s.into_bytes())
+    fn generate_seq_entry() -> impl Strategy<Value = XorName> {
+        "\\PC*".prop_map(|s| XorName::from_content(&[&s.into_bytes()]))
     }
 
     // Generate a vec of Sequence entries
-    fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<Vec<u8>>> {
+    fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<XorName>> {
         prop::collection::vec(generate_seq_entry(), 1..max_quantity + 1)
     }
 

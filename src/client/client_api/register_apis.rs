@@ -180,7 +180,7 @@ impl Client {
             .get(hash, None)?
             .ok_or_else(|| Error::from(crate::types::Error::NoSuchEntry))?;
 
-        Ok(entry.to_vec())
+        Ok(*entry)
     }
 
     //----------------------
@@ -376,20 +376,21 @@ mod tests {
             .store_public_register(name, tag, owner, perms)
             .await?;
 
+        let value_1 = XorName::random();
+        let value_2 = XorName::random();
+
         // write to the register
-        let value1_hash =
-            retry_loop!(client.write_to_register(address, b"VALUE1".to_vec(), BTreeSet::new()));
+        let value1_hash = retry_loop!(client.write_to_register(address, value_1, BTreeSet::new()));
 
         // now check last entry
         let hashes = retry_loop_for_pattern!(client.read_register(address), Ok(hashes) if !hashes.is_empty())?;
 
         assert_eq!(1, hashes.len());
         let current = hashes.iter().next();
-        assert_eq!(current, Some(&(value1_hash, b"VALUE1".to_vec())));
+        assert_eq!(current, Some(&(value1_hash, value_1)));
 
         // write to the register
-        let value2_hash =
-            retry_loop!(client.write_to_register(address, b"VALUE2".to_vec(), BTreeSet::new()));
+        let value2_hash = retry_loop!(client.write_to_register(address, value_2, BTreeSet::new()));
 
         // and then lets check last entry
         let hashes =
@@ -397,14 +398,14 @@ mod tests {
 
         assert_eq!(2, hashes.len());
         let current = hashes.iter().next();
-        assert_eq!(current, Some(&(value2_hash, b"VALUE2".to_vec())));
+        assert_eq!(current, Some(&(value2_hash, value_2)));
 
         // get_register_entry
-        let value1 = client.get_register_entry(address, value1_hash).await?;
-        assert_eq!(std::str::from_utf8(&value1)?, "VALUE1");
+        let value_1_res = client.get_register_entry(address, value1_hash).await?;
+        assert_eq!(value_1_res, value_1);
 
-        let value2 = client.get_register_entry(address, value2_hash).await?;
-        assert_eq!(std::str::from_utf8(&value2)?, "VALUE2");
+        let value_2_res = client.get_register_entry(address, value2_hash).await?;
+        assert_eq!(value_2_res, value_2);
 
         // Requesting a hash which desn't exist throws an error
         match client

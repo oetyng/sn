@@ -309,8 +309,8 @@ mod tests {
         );
 
         // And let's write an item to replica1 with autority1
-        let item1 = b"item1";
-        let (_, op1) = replica1.write(item1.to_vec(), BTreeSet::new())?;
+        let item1 = XorName::random();
+        let (_, op1) = replica1.write(item1, BTreeSet::new())?;
         let signed_write_op1 = sign_register_op(op1, &authority_keypair1)?;
 
         // Let's assert current state on both replicas
@@ -318,8 +318,8 @@ mod tests {
         assert_eq!(replica2.size(None)?, 0);
 
         // Concurrently write another item with authority2 on replica2
-        let item2 = b"item2";
-        let (_, op2) = replica2.write(item2.to_vec(), BTreeSet::new())?;
+        let item2 = XorName::random();
+        let (_, op2) = replica2.write(item2, BTreeSet::new())?;
         let signed_write_op2 = sign_register_op(op2, &authority_keypair2)?;
 
         // Item should be writeed on replica2
@@ -339,20 +339,20 @@ mod tests {
     fn register_get_by_hash() -> anyhow::Result<()> {
         let (_, register) = &mut create_public_reg_replicas(1)[0];
 
-        let entry1 = b"value0".to_vec();
-        let entry2 = b"value1".to_vec();
-        let entry3 = b"value2".to_vec();
+        let entry1 = XorName::random();
+        let entry2 = XorName::random();
+        let entry3 = XorName::random();
 
-        let (entry1_hash, _) = register.write(entry1.to_vec(), BTreeSet::new())?;
+        let (entry1_hash, _) = register.write(entry1, BTreeSet::new())?;
 
         // this creates a fork since entry1 is not set as parent of entry2
-        let (entry2_hash, _) = register.write(entry2.clone(), BTreeSet::new())?;
+        let (entry2_hash, _) = register.write(entry2, BTreeSet::new())?;
 
         // we'll write entry2 but having the entry1 and entry2 as parents,
         // i.e. solving the fork created by them
         let parents = vec![entry1_hash, entry2_hash].into_iter().collect();
 
-        let (entry3_hash, _) = register.write(entry3.clone(), parents)?;
+        let (entry3_hash, _) = register.write(entry3, parents)?;
 
         assert_eq!(register.size(None)?, 3);
 
@@ -541,13 +541,13 @@ mod tests {
         );
 
         // let's write to both replicas with one first item
-        let item1 = b"item1";
-        let item2 = b"item2";
-        let (_, op1) = replica1.write(item1.to_vec(), BTreeSet::new())?;
+        let item1 = XorName::random();
+        let item2 = XorName::random();
+        let (_, op1) = replica1.write(item1, BTreeSet::new())?;
         let write_op1 = sign_register_op(op1, &authority_keypair1)?;
         check_op_not_allowed_failure(replica2.apply_op(write_op1))?;
 
-        let (_, op2) = replica2.write(item2.to_vec(), BTreeSet::new())?;
+        let (_, op2) = replica2.write(item2, BTreeSet::new())?;
         let write_op2 = sign_register_op(op2, &authority_keypair2)?;
         replica1.apply_op(write_op2)?;
 
@@ -595,14 +595,14 @@ mod tests {
         );
 
         // let's try to write to both registers
-        let item1 = b"item1";
-        let item2 = b"item2";
+        let item1 = XorName::random();
+        let item2 = XorName::random();
 
-        let (entry1_hash, op1) = replica1.write(item1.to_vec(), BTreeSet::new())?;
+        let (entry1_hash, op1) = replica1.write(item1, BTreeSet::new())?;
         let write_op1 = sign_register_op(op1, &authority_keypair1)?;
         check_op_not_allowed_failure(replica2.apply_op(write_op1))?;
 
-        let (entry2_hash, op2) = replica2.write(item2.to_vec(), BTreeSet::new())?;
+        let (entry2_hash, op2) = replica2.write(item2, BTreeSet::new())?;
         let write_op2 = sign_register_op(op2, &authority_keypair2)?;
         replica1.apply_op(write_op2)?;
 
@@ -614,21 +614,18 @@ mod tests {
         // let's check authority1 can read from replica1 and replica2
         let data = replica1.get(entry1_hash, Some(authority1))?;
         let last = replica1.read(Some(authority1))?;
-        assert_eq!(data, Some(&item1.to_vec()));
+        assert_eq!(data, Some(&item1));
         assert_eq!(
             last,
-            vec![(entry1_hash, item1.to_vec()), (entry2_hash, item2.to_vec())]
+            vec![(entry1_hash, item1), (entry2_hash, item2)]
                 .into_iter()
                 .collect()
         );
 
         let data = replica2.get(entry2_hash, Some(authority1))?;
         let last = replica2.read(Some(authority1))?;
-        assert_eq!(data, Some(&item2.to_vec()));
-        assert_eq!(
-            last,
-            vec![(entry2_hash, item2.to_vec())].into_iter().collect()
-        );
+        assert_eq!(data, Some(&item2));
+        assert_eq!(last, vec![(entry2_hash, item2)].into_iter().collect());
 
         // authority2 cannot read from replica1
         check_op_not_allowed_failure(replica1.get(entry1_hash, Some(authority2)))?;
@@ -637,11 +634,8 @@ mod tests {
         // but authority2 can read from replica2
         let data = replica2.get(entry2_hash, Some(authority2))?;
         let last = replica2.read(Some(authority2))?;
-        assert_eq!(data, Some(&item2.to_vec()));
-        assert_eq!(
-            last,
-            vec![(entry2_hash, item2.to_vec())].into_iter().collect()
-        );
+        assert_eq!(data, Some(&item2));
+        assert_eq!(last, vec![(entry2_hash, item2)].into_iter().collect());
 
         Ok(())
     }
@@ -784,12 +778,12 @@ mod tests {
     }
 
     // Generate a Register entry
-    fn generate_reg_entry() -> impl Strategy<Value = Vec<u8>> {
-        "\\PC*".prop_map(|s| s.into_bytes())
+    fn generate_reg_entry() -> impl Strategy<Value = XorName> {
+        "\\PC*".prop_map(|s| XorName::from_content(&[&s.into_bytes()]))
     }
 
     // Generate a vec of Register entries
-    fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<Vec<u8>>> {
+    fn generate_dataset(max_quantity: usize) -> impl Strategy<Value = Vec<XorName>> {
         prop::collection::vec(generate_reg_entry(), 1..max_quantity + 1)
     }
 
@@ -797,7 +791,7 @@ mod tests {
     // the delivery chance of the op that gets created with the entry
     fn generate_dataset_and_probability(
         max_quantity: usize,
-    ) -> impl Strategy<Value = Vec<(Vec<u8>, u8)>> {
+    ) -> impl Strategy<Value = Vec<(XorName, u8)>> {
         prop::collection::vec((generate_reg_entry(), any::<u8>()), 1..max_quantity + 1)
     }
 

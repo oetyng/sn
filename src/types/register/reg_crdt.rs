@@ -136,7 +136,7 @@ impl RegisterCrdt {
         self.data
             .read()
             .hashes_and_nodes()
-            .map(|(hash, node)| (hash, node.value.clone()))
+            .map(|(hash, node)| (hash, node.value))
             .collect()
     }
 }

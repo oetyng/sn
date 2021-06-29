@@ -233,7 +233,7 @@ impl SequenceStorage {
             .get_chunk(address, SequenceAction::Read, requester)
             .await
             .and_then(|sequence| match sequence.last_entry(Some(requester))? {
-                Some(entry) => Ok((sequence.len(Some(requester))? - 1, entry.to_vec())),
+                Some(entry) => Ok((sequence.len(Some(requester))? - 1, *entry)),
                 None => Err(Error::NetworkData(DtError::NoSuchEntry)),
             }) {
             Ok(res) => Ok(res),

@@ -211,7 +211,7 @@ impl Client {
         let sequence = self.get_sequence(address).await?;
         // TODO: do we need to query with some specific PK?
         match sequence.last_entry(None)? {
-            Some(entry) => Ok((sequence.len(None)? - 1, entry.to_vec())),
+            Some(entry) => Ok((sequence.len(None)? - 1, *entry)),
             None => Err(Error::from(crate::types::Error::NoSuchEntry)),
         }
     }
@@ -236,7 +236,7 @@ impl Client {
         let sequence = self.get_sequence(address).await?;
         let index = SequenceIndex::FromStart(index_from_start);
         match sequence.get(index, None)? {
-            Some(entry) => Ok(entry.to_vec()),
+            Some(entry) => Ok(*entry),
             None => Err(Error::from(crate::types::Error::NoSuchEntry)),
         }
     }
@@ -584,46 +584,49 @@ mod tests {
             .store_public_sequence(None, name, tag, owner, perms)
             .await?;
 
+        let value_1 = XorName::random();
+        let value_2 = XorName::random();
+
         // append to the data the data
-        let _ = retry_loop!(client.append_to_sequence(address, b"VALUE1".to_vec()));
+        let _ = retry_loop!(client.append_to_sequence(address, value_1));
         // now check last entry
-        let (index, data) = retry_loop!(client.get_sequence_last_entry(address));
+        let (index, value_1_res) = retry_loop!(client.get_sequence_last_entry(address));
 
         assert_eq!(0, index);
-        assert_eq!(std::str::from_utf8(&data)?, "VALUE1");
+        assert_eq!(value_1_res, value_1);
 
         // append to the data the data
-        let _ = retry_loop!(client.append_to_sequence(address, b"VALUE2".to_vec()));
+        let _ = retry_loop!(client.append_to_sequence(address, value_2));
 
         // and then lets check last entry
-        let (mut index, mut data) = retry_loop!(client.get_sequence_last_entry(address));
+        let (mut index, mut value_2_res) = retry_loop!(client.get_sequence_last_entry(address));
 
         // we might still be getting old data here
         while index == 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             let (i, d) = client.get_sequence_last_entry(address).await?;
             index = i;
-            data = d;
+            value_2_res = d;
         }
 
         assert_eq!(1, index);
-        assert_eq!(std::str::from_utf8(&data)?, "VALUE2");
+        assert_eq!(value_2_res, value_2);
 
         let data = retry_loop!(client.get_sequence_range(
             address,
             (SequenceIndex::FromStart(0), SequenceIndex::FromEnd(0)),
         ));
 
-        assert_eq!(std::str::from_utf8(&data[0])?, "VALUE1");
-        assert_eq!(std::str::from_utf8(&data[1])?, "VALUE2");
+        assert_eq!(data[0], value_1);
+        assert_eq!(data[1], value_2);
 
         // get_sequence_entry
 
         let data0 = client.get_sequence_entry(address, 0).await?;
-        assert_eq!(std::str::from_utf8(&data0)?, "VALUE1");
+        assert_eq!(data0, value_1);
 
         let data1 = client.get_sequence_entry(address, 1).await?;
-        assert_eq!(std::str::from_utf8(&data1)?, "VALUE2");
+        assert_eq!(data1, value_2);
 
         // Requesting a version that's too high throws an error
         let res = client.get_sequence_entry(address, 2).await;
