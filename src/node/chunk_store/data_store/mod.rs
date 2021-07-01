@@ -92,7 +92,7 @@ impl<T: Data> DataStore<T> {
     /// an IO error, it returns `Error::Io`.
     ///
     /// If a chunk with the same id already exists, it will be overwritten.
-    pub async fn put(&mut self, chunk: &T) -> Result<()> {
+    pub async fn put(&self, chunk: &T) -> Result<()> {
         info!("Writing chunk");
         let serialised_chunk = utils::serialise(chunk)?;
         let consumed_space = serialised_chunk.len() as u64;
@@ -132,7 +132,7 @@ impl<T: Data> DataStore<T> {
     ///
     /// If the data doesn't exist, it does nothing and returns `Ok`.  In the case of an IO error, it
     /// returns `Error::Io`.
-    pub async fn delete(&mut self, id: &T::Id) -> Result<()> {
+    pub async fn delete(&self, id: &T::Id) -> Result<()> {
         self.do_delete(&self.file_path(id)?).await
     }
 
@@ -195,7 +195,7 @@ impl<T: Data> DataStore<T> {
         Ok(keys)
     }
 
-    async fn do_delete(&mut self, file_path: &Path) -> Result<()> {
+    async fn do_delete(&self, file_path: &Path) -> Result<()> {
         if let Ok(metadata) = fs::metadata(file_path).await {
             self.used_space.decrease(self.id, metadata.len()).await?;
             fs::remove_file(file_path).await.map_err(From::from)
