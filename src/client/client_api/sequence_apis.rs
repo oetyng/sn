@@ -384,9 +384,8 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::utils::test_utils::{create_test_client, gen_ed_keypair};
+    use crate::client::utils::test_utils::{create_test_client, gen_ed_keypair, run_w_backoff};
     use crate::messaging::client::Error as ErrorMessage;
-    use crate::retry_loop;
     use crate::types::{Error as DtError, SequenceAction, SequencePrivatePermissions};
     use anyhow::{anyhow, bail, Result};
     use tokio::time::Duration;
@@ -409,7 +408,7 @@ mod tests {
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
 
-        let sequence = retry_loop!(client.get_sequence(address));
+        let sequence = run_w_backoff(|| client.get_sequence(address), 10).await?;
 
         assert!(sequence.is_private());
         assert_eq!(*sequence.name(), name);
@@ -423,7 +422,7 @@ mod tests {
             .store_public_sequence(None, name, tag, owner, perms)
             .await?;
 
-        let sequence = retry_loop!(client.get_sequence(address));
+        let sequence = run_w_backoff(|| client.get_sequence(address), 10).await?;
 
         assert!(sequence.is_public());
         assert_eq!(*sequence.name(), name);
@@ -445,12 +444,15 @@ mod tests {
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
 
-        let data = retry_loop!(client.get_sequence(address));
+        let data = run_w_backoff(|| client.get_sequence(address), 10).await?;
 
         assert_eq!(data.len(None)?, 0);
 
-        let user_perms =
-            retry_loop!(client.get_sequence_private_permissions_for_user(address, owner));
+        let user_perms = run_w_backoff(
+            || client.get_sequence_private_permissions_for_user(address, owner),
+            10,
+        )
+        .await?;
 
         assert!(user_perms.is_allowed(SequenceAction::Read));
         assert!(user_perms.is_allowed(SequenceAction::Append));
@@ -515,8 +517,11 @@ mod tests {
             .store_public_sequence(None, name, tag, owner, perms)
             .await?;
 
-        let user_perms =
-            retry_loop!(client.get_sequence_public_permissions_for_user(address, owner));
+        let user_perms = run_w_backoff(
+            || client.get_sequence_public_permissions_for_user(address, owner),
+            10,
+        )
+        .await?;
 
         assert_eq!(Some(true), user_perms.is_allowed(SequenceAction::Read));
         assert_eq!(None, user_perms.is_allowed(SequenceAction::Append));
@@ -588,18 +593,20 @@ mod tests {
         let value_2 = XorName::random();
 
         // append to the data the data
-        let _ = retry_loop!(client.append_to_sequence(address, value_1));
+        let _ = run_w_backoff(|| client.append_to_sequence(address, value_1), 10).await?;
         // now check last entry
-        let (index, value_1_res) = retry_loop!(client.get_sequence_last_entry(address));
+        let (index, value_1_res) =
+            run_w_backoff(|| client.get_sequence_last_entry(address), 10).await?;
 
         assert_eq!(0, index);
         assert_eq!(value_1_res, value_1);
 
         // append to the data the data
-        let _ = retry_loop!(client.append_to_sequence(address, value_2));
+        let _ = run_w_backoff(|| client.append_to_sequence(address, value_2), 10).await?;
 
         // and then lets check last entry
-        let (mut index, mut value_2_res) = retry_loop!(client.get_sequence_last_entry(address));
+        let (mut index, mut value_2_res) =
+            run_w_backoff(|| client.get_sequence_last_entry(address), 10).await?;
 
         // we might still be getting old data here
         while index == 0 {
@@ -612,10 +619,16 @@ mod tests {
         assert_eq!(1, index);
         assert_eq!(value_2_res, value_2);
 
-        let data = retry_loop!(client.get_sequence_range(
-            address,
-            (SequenceIndex::FromStart(0), SequenceIndex::FromEnd(0)),
-        ));
+        let data = run_w_backoff(
+            || {
+                client.get_sequence_range(
+                    address,
+                    (SequenceIndex::FromStart(0), SequenceIndex::FromEnd(0)),
+                )
+            },
+            10,
+        )
+        .await?;
 
         assert_eq!(data[0], value_1);
         assert_eq!(data[1], value_2);
@@ -652,7 +665,7 @@ mod tests {
             .await?;
 
         // Assert that the data is stored.
-        let current_owner = retry_loop!(client.get_sequence_owner(address));
+        let current_owner = run_w_backoff(|| client.get_sequence_owner(address), 10).await?;
 
         assert_eq!(owner, current_owner);
 
@@ -673,7 +686,7 @@ mod tests {
             .store_private_sequence(None, name, tag, owner, perms)
             .await?;
 
-        let sequence = retry_loop!(client.get_sequence(address));
+        let sequence = run_w_backoff(|| client.get_sequence(address), 10).await?;
 
         assert!(sequence.is_private());
 
