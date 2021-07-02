@@ -362,6 +362,8 @@ mod tests {
     use self_encryption::Storage;
     use tokio::time::{Duration, Instant};
 
+    const BLOB_TEST_QUERY_TIMEOUT: u64 = 60;
+
     // Test storing and getting public Blob.
     #[tokio::test]
     #[ignore = "too heavy for CI"]
@@ -464,7 +466,7 @@ mod tests {
         let priv_address = client.store_private_blob(&value).await?;
         // check it's the expected Blob address
         assert_eq!(expected_address, priv_address);
-
+        
         // Assert that the blob is stored.
         let fetched_data = run_w_backoff(|| client.read_blob(priv_address, None, None), 10).await?;
         assert_eq!(value, fetched_data);
@@ -476,7 +478,7 @@ mod tests {
 
         // Test storing public chunk with the same value. Should not conflict.
         let public_address = client.store_public_blob(&value).await?;
-
+        
         // Assert that the public Blob is stored.
         let fetched_data =
             run_w_backoff(|| client.read_blob(public_address, None, None), 10).await?;
@@ -506,7 +508,7 @@ mod tests {
         // Test storing private chunk with the same value again. Should not conflict.
         let new_addr = client.store_private_blob(&value).await?;
         assert_eq!(new_addr, priv_address);
-
+        
         // Assert that the Blob is stored again.
         let fetched_data = run_w_backoff(|| client.read_blob(priv_address, None, None), 10).await?;
         assert_eq!(value, fetched_data);
@@ -520,7 +522,7 @@ mod tests {
 
         let value = generate_random_vector::<u8>(1024 * 1024);
         let address = client.store_private_blob(&value).await?;
-
+        
         // let's make sure we have all chunks stored on the network
         let _ = run_w_backoff(|| client.read_blob(address, None, None), 10).await?;
 
@@ -536,7 +538,6 @@ mod tests {
         };
 
         client.delete_blob(address).await?;
-
         client.clear_blob_cache().await;
 
         client.query_timeout = Duration::from_secs(5); // override with a short timeout
@@ -546,7 +547,6 @@ mod tests {
             for chunk in chunks {
                 let _ = retry_err_loop!(blob_storage.get(&chunk.hash));
             }
-
             Ok(())
         } else {
             Err(anyhow!(
@@ -560,16 +560,13 @@ mod tests {
     #[tokio::test]
     pub async fn create_and_retrieve_1kb_pub_unencrypted() -> Result<()> {
         let size = 1024;
-
         gen_data_then_create_and_retrieve(size, true).await?;
-
         Ok(())
     }
 
     #[tokio::test]
     pub async fn create_and_retrieve_1kb_private_unencrypted() -> Result<()> {
         let size = 1024;
-
         gen_data_then_create_and_retrieve(size, false).await?;
         Ok(())
     }
@@ -581,7 +578,7 @@ mod tests {
 
         let client = create_test_client(Some(BLOB_TEST_QUERY_TIMEOUT)).await?;
         let address = client.store_public_blob(&data).await?;
-
+        
         // let's make sure the public chunk is stored
         let _ = run_w_backoff(|| client.read_blob(address, None, None), 10).await?;
 
@@ -603,11 +600,11 @@ mod tests {
         let client = create_test_client(Some(BLOB_TEST_QUERY_TIMEOUT)).await?;
 
         let address = client.store_private_blob(&value).await?;
-
+        
         // let's make sure the private chunk is stored
         let _ = run_w_backoff(|| client.read_blob(address, None, None), 10).await?;
 
-        // and now trying to read a public chunk with same address should fail
+        // and now trying to read a public chunk with same address should fail (timeout)
         let res = client
             .read_blob(ChunkAddress::Public(*address.name()), None, None)
             .await;
@@ -637,7 +634,6 @@ mod tests {
     pub async fn create_and_retrieve_10mb_private() -> Result<()> {
         let size = 1024 * 1024 * 10;
         gen_data_then_create_and_retrieve(size, false).await?;
-
         Ok(())
     }
 
@@ -653,11 +649,8 @@ mod tests {
     pub async fn create_and_retrieve_100mb_public() -> Result<()> {
         let size = 1024 * 1024 * 100;
         gen_data_then_create_and_retrieve(size, true).await?;
-
         Ok(())
     }
-
-    const BLOB_TEST_QUERY_TIMEOUT: u64 = 60;
 
     #[tokio::test]
     pub async fn create_and_retrieve_index_based() -> Result<()> {
@@ -680,7 +673,7 @@ mod tests {
         let client = create_test_client(Some(BLOB_TEST_QUERY_TIMEOUT)).await?;
 
         let address = client.store_public_blob(&data).await?;
-
+        
         let fetched_data = run_w_backoff(
             || client.read_blob(address, Some(size / 2), Some(size / 2)),
             10,
@@ -706,7 +699,7 @@ mod tests {
 
         let address_before = chunk.address();
 
-        // attempt to retrieve it with generated address (it should error)
+        // attempt to retrieve it with generated address (it should error, i.e. timeout)
         let res = client.read_blob(*address_before, None, None).await;
         match res {
             Err(Error::NoResponse) => (),
@@ -721,7 +714,7 @@ mod tests {
         } else {
             client.store_private_blob(&raw_data).await?
         };
-
+        
         // now that it was put to the network we should be able to retrieve it
         let fetched_data = run_w_backoff(|| client.read_blob(address, None, None), 10).await?;
         // then the content should be what we put
