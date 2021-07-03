@@ -7,11 +7,14 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 pub use crate::messaging::{client::Error as ErrorMessage, Error as MessagingError};
-use crate::messaging::{
-    client::{CmdError, QueryResponse},
-    MessageId,
-};
 use crate::types::Error as DtError;
+use crate::{
+    dbs,
+    messaging::{
+        client::{CmdError, QueryResponse},
+        MessageId,
+    },
+};
 use qp2p::Error as QuicP2pError;
 use std::io;
 
@@ -28,6 +31,9 @@ pub enum Error {
     /// Symmetric Key Decryption Failed.
     #[error("Symmetric key decryption failure")]
     SymmetricDecipherFailure,
+    /// Database error.
+    #[error("Database error:: {0}")]
+    Database(#[from] dbs::Error),
     /// Received unexpected data.
     #[error("Unexpected data received")]
     ReceivedUnexpectedData,

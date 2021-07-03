@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, trace};
 
 #[derive(Serialize, Deserialize)]
-enum DataMapLevel {
+pub enum DataMapLevel {
     // Holds the data map that is returned after writing the client's data
     // to the network
     Root(DataMap),

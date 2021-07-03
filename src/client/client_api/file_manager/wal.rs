@@ -6,38 +6,49 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use sled::Db;
-use crate::types::{Chunk, ChunkAddress, PrivateChunk, PublicChunk, PublicKey};
+use crate::{
+    client::Error,
+    dbs::{DataStore, UsedSpace},
+    types::{Chunk, ChunkAddress, PrivateChunk, PublicChunk, PublicKey},
+};
 use async_trait::async_trait;
 use self_encryption::{SelfEncryptionError, Storage};
+use std::path::Path;
 use tracing::trace;
 use xor_name::{XorName, XOR_NAME_LEN};
 
 /// Network storage is the concrete type which self_encryption crate will use
 /// to put or get data from the network.
 #[derive(Clone)]
-pub struct LocalBlobStorage {
-    db: Db,
-    public: bool,
-    public_key: PublicKey,
+pub struct FileWAL {
+    db: DataStore<Chunk>,
+    owner: Option<PublicKey>,
 }
 
-impl LocalBlobStorage {
+pub struct FileWALConfig {
+    pub owner: Option<PublicKey>,
+    pub used_space: UsedSpace,
+}
+
+impl FileWAL {
     /// Create a new LocalBlobStorage instance.
-    pub fn new(root: &Path, public: bool, public_key: PublicKey) -> Self {
-        let suffix = if public {
-            "public"
-        } else {
-            "private"
-        };
-        let dir = root.as_ref().join("local_blobs").join(suffix);
-        let db = sled::open(&dir).map_err(|e| Error::Logic(e.to_string()))?;
-        Self { db, public, public_key }
+    pub async fn new(root: &Path, config: FileWALConfig) -> Result<Self, Error> {
+        let suffix = if config.owner.is_none() { "public" } else { "private" };
+        let sub_dirs = Path::new("wal").join(suffix);
+
+        let db = DataStore::new(root, sub_dirs.as_path(), config.used_space)
+            .await
+            .map_err(Error::from)?;
+
+        Ok(Self {
+            db,
+            owner: config.owner,
+        })
     }
 }
 
 #[async_trait]
-impl Storage for LocalBlobStorage {
+impl Storage for FileWAL {
     async fn get(&mut self, name: &[u8]) -> Result<Vec<u8>, SelfEncryptionError> {
         if name.len() != XOR_NAME_LEN {
             return Err(SelfEncryptionError::Generic(
@@ -51,7 +62,7 @@ impl Storage for LocalBlobStorage {
             XorName(temp)
         };
 
-        let address = if self.public {
+        let address = if self.owner.is_none() {
             ChunkAddress::Public(name)
         } else {
             ChunkAddress::Private(name)
@@ -59,7 +70,7 @@ impl Storage for LocalBlobStorage {
 
         trace!("Self encrypt invoked GetChunk({:?})", &address);
 
-        match self.client.fetch_blob_from_network(address, true).await {
+        match self.db.get(&address).await {
             Ok(data) => Ok(data.value().clone()),
             Err(error) => Err(SelfEncryptionError::Generic(format!("{:?}", error))),
         }
@@ -78,7 +89,7 @@ impl Storage for LocalBlobStorage {
             XorName(temp)
         };
 
-        let address = if self.public {
+        let address = if self.owner.is_none() {
             return Err(SelfEncryptionError::Generic(
                 "Cannot delete on a public storage".to_owned(),
             ));
@@ -87,78 +98,40 @@ impl Storage for LocalBlobStorage {
         };
         trace!("Self encrypt invoked DeleteBlob({:?})", &address);
 
-        match self.client.delete_chunk_from_network(address).await {
+        match self.db.delete(&address).await {
             Ok(_) => Ok(()),
             Err(error) => Err(SelfEncryptionError::Generic(format!("{:?}", error))),
         }
     }
 
     async fn put(&mut self, _: Vec<u8>, data: Vec<u8>) -> Result<(), SelfEncryptionError> {
-        let chunk: Chunk = if self.public {
-            PublicChunk::new(data).into()
+        let chunk: Chunk = if let Some(owner) = self.owner {
+            PrivateChunk::new(data, owner).into()
         } else {
-            PrivateChunk::new(data, self.client.public_key()).into()
+            PublicChunk::new(data).into()
         };
         trace!("Self encrypt invoked StoreChunk({:?})", &chunk);
-        self.client
-            .store_chunk_on_network(chunk)
+        self.db
+            .put(&chunk)
             .await
             .map_err(|err| SelfEncryptionError::Generic(format!("{:?}", err)))
     }
 
     async fn generate_address(&self, data: &[u8]) -> Result<Vec<u8>, SelfEncryptionError> {
-        let chunk: Chunk = if self.public {
-            PublicChunk::new(data.to_vec()).into()
-        } else {
-            PrivateChunk::new(data.to_vec(), self.client.public_key()).into()
-        };
-        Ok(chunk.name().0.to_vec())
-    }
-}
-
-/// Network storage is the concrete type which self_encryption crate will use
-/// to put or get data from the network.
-#[derive(Clone)]
-pub struct BlobStorageDryRun {
-    privately_owned: Option<PublicKey>,
-}
-
-impl BlobStorageDryRun {
-    /// Create a new BlobStorage instance.
-    pub fn new(privately_owned: Option<PublicKey>) -> Self {
-        Self { privately_owned }
-    }
-}
-
-#[async_trait]
-impl Storage for BlobStorageDryRun {
-    async fn get(&mut self, _name: &[u8]) -> Result<Vec<u8>, SelfEncryptionError> {
-        trace!("Self encrypt invoked GetChunk dry run.");
-        Err(SelfEncryptionError::Generic(
-            "Cannot get from storage since it's a dry run.".to_owned(),
-        ))
-    }
-
-    async fn put(&mut self, _: Vec<u8>, _data: Vec<u8>) -> Result<(), SelfEncryptionError> {
-        trace!("Self encrypt invoked StoreChunk dry run.");
-        // We do nothing here just return ok so self_encrpytion can finish
-        // and generate chunk addresses and datamap if required
-        Ok(())
-    }
-
-    async fn delete(&mut self, _name: &[u8]) -> Result<(), SelfEncryptionError> {
-        trace!("Self encrypt invoked DeleteChunk dry run.");
-
-        Ok(())
-    }
-
-    async fn generate_address(&self, data: &[u8]) -> Result<Vec<u8>, SelfEncryptionError> {
-        let chunk: Chunk = if let Some(owner) = self.privately_owned {
+        let chunk: Chunk = if let Some(owner) = self.owner {
             PrivateChunk::new(data.to_vec(), owner).into()
         } else {
             PublicChunk::new(data.to_vec()).into()
         };
-
         Ok(chunk.name().0.to_vec())
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     #[tokio::test]
+//     #[ignore = "too heavy for CI"]
+//     pub async fn basic() -> Result<()> {}
+// }

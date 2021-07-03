@@ -27,6 +27,7 @@ const DB_DIR: &str = "db";
 
 /// `DataStore` is a store of data held as serialised files on disk, implementing a maximum disk
 /// usage to restrict storage.
+#[derive(Clone)]
 pub(crate) struct DataStore<T: Data> {
     // Maximum space allowed for all `DataStore`s to consume.
     used_space: UsedSpace,
@@ -37,7 +38,6 @@ pub(crate) struct DataStore<T: Data> {
 impl<T> DataStore<T>
 where
     T: Data,
-    Self: Subdir,
 {
     /// Creates a new `DataStore` at location `root/CHUNK_STORE_DIR/<chunk type>`.
     ///
@@ -46,8 +46,8 @@ where
     ///
     /// The maximum storage space is defined by `max_capacity`.  This specifies the max usable by
     /// _all_ `DataStores`, not per `DataStore`.
-    pub async fn new<P: AsRef<Path>>(root: P, used_space: UsedSpace) -> Result<Self> {
-        let dir = root.as_ref().join(DB_DIR).join(Self::subdir());
+    pub async fn new<P: AsRef<Path>>(root: P, sub_dirs: P, used_space: UsedSpace) -> Result<Self> {
+        let dir = root.as_ref().join(DB_DIR).join(sub_dirs);
 
         used_space.add_dir(&dir);
 
@@ -161,8 +161,4 @@ impl<T: Data> DataStore<T> {
             .collect();
         Ok(keys)
     }
-}
-
-pub(crate) trait Subdir {
-    fn subdir() -> &'static Path;
 }

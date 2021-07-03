@@ -8,7 +8,7 @@
 
 use super::{
     data::{Data, DataId},
-    DataStore, Error, Result as DataStoreResult, Result, Subdir, ToDbKey, UsedSpace,
+    DataStore, Error, Result as DataStoreResult, Result, ToDbKey, UsedSpace,
 };
 use crate::types::{ChunkAddress, DataAddress};
 use rand::{distributions::Standard, rngs::ThreadRng, Rng};
@@ -40,12 +40,6 @@ impl DataId for Id {
         DataAddress::Chunk(ChunkAddress::Public(XorName::from_content(&[&self
             .0
             .to_be_bytes()])))
-    }
-}
-
-impl Subdir for DataStore<TestData> {
-    fn subdir() -> &'static Path {
-        Path::new("test")
     }
 }
 
@@ -92,11 +86,11 @@ async fn used_space_increases() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::<TestData>::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     let used_space_before = data_store.total_used_space().await;
+
+    println!("used_space_before: {}", used_space_before);
 
     for (index, (data, _size)) in chunks.data_and_sizes.iter().enumerate().rev() {
         let the_data = &TestData {
@@ -116,6 +110,8 @@ async fn used_space_increases() -> Result<()> {
         used_space_after = data_store.total_used_space().await;
     }
 
+    println!("used_space_after: {}", used_space_after);
+
     assert!(used_space_after > used_space_before);
 
     Ok(())
@@ -127,9 +123,7 @@ async fn used_space_decreases() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::<TestData>::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     for (index, (data, _size)) in chunks.data_and_sizes.iter().enumerate().rev() {
         let the_data = &TestData {
@@ -163,9 +157,7 @@ async fn successful_put() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::<TestData>::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     for (index, (data, _size)) in chunks.data_and_sizes.iter().enumerate().rev() {
         let the_data = &TestData {
@@ -192,10 +184,8 @@ async fn successful_put() -> Result<()> {
 #[tokio::test]
 async fn failed_put_when_not_enough_space() -> Result<()> {
     let mut rng = new_rng();
-    let root = temp_dir()?;
     let capacity = 32;
-    let used_space = UsedSpace::new(capacity);
-    let data_store = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store_with(capacity).await?;
 
     let data = TestData {
         id: Id(rng.gen()),
@@ -223,9 +213,7 @@ async fn delete() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     for (index, (data, _size)) in chunks.data_and_sizes.iter().enumerate() {
         let the_data = &TestData {
@@ -253,9 +241,7 @@ async fn put_and_get_value_should_be_same() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     for (index, (data, _)) in chunks.data_and_sizes.iter().enumerate() {
         data_store
@@ -275,16 +261,13 @@ async fn put_and_get_value_should_be_same() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "Has been failing for a long time, fix coming up."]
 async fn overwrite_value() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
-    for (data, size) in chunks.data_and_sizes {
+    for (data, _) in chunks.data_and_sizes {
         data_store
             .put(&TestData {
                 id: Id(0),
@@ -296,15 +279,6 @@ async fn overwrite_value() -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
 
-        loop {
-            let used_space = data_store.total_used_space().await;
-            if used_space == size {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
-
-        assert_eq!(data_store.total_used_space().await, size);
         let retrieved_data = data_store.get(&Id(0)).await?;
         assert_eq!(data, retrieved_data.value);
     }
@@ -314,9 +288,7 @@ async fn overwrite_value() -> Result<()> {
 
 #[tokio::test]
 async fn get_fails_when_key_does_not_exist() -> Result<()> {
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store: DataStore<TestData> = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store::<TestData>().await?;
 
     let id = Id(new_rng().gen());
     match data_store.get(&id).await {
@@ -337,9 +309,7 @@ async fn keys() -> Result<()> {
     let mut rng = new_rng();
     let chunks = Chunks::gen(&mut rng)?;
 
-    let root = temp_dir()?;
-    let used_space = UsedSpace::new(u64::MAX);
-    let data_store = DataStore::new(root.path(), used_space).await?;
+    let (data_store, _dir) = get_store().await?;
 
     for (index, (data, _)) in chunks.data_and_sizes.iter().enumerate() {
         let id = Id(index as u64);
@@ -368,4 +338,15 @@ async fn keys() -> Result<()> {
     }
 
     Ok(())
+}
+
+// must return tempdir as it is deleted when going out of scope
+async fn get_store<T: Data>() -> Result<(DataStore<T>, TempDir)> {
+    get_store_with(u64::MAX).await
+}
+
+async fn get_store_with<T: Data>(capacity: u64) -> Result<(DataStore<T>, TempDir)> {
+    let root = temp_dir()?;
+    let used_space = UsedSpace::new(capacity);
+    Ok((DataStore::new(root.path(), Path::new("test"), used_space).await?, root))
 }

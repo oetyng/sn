@@ -9,7 +9,7 @@
 //mod data_store;
 
 use super::node_ops::{MsgType, OutgoingMsg};
-use crate::dbs::{Data, DataId, DataStore, Subdir, UsedSpace};
+use crate::dbs::{Data, DataId, DataStore, UsedSpace};
 use crate::node::{
     node_ops::{NodeDuties, NodeDuty},
     Result,
@@ -49,12 +49,6 @@ impl DataId for ChunkAddress {
     }
 }
 
-impl Subdir for DataStore<Chunk> {
-    fn subdir() -> &'static Path {
-        Path::new("chunks")
-    }
-}
-
 /// Operations on data chunks.
 pub(crate) struct ChunkStore {
     store: DataStore<Chunk>,
@@ -63,7 +57,7 @@ pub(crate) struct ChunkStore {
 impl ChunkStore {
     pub async fn new(path: &Path, used_space: UsedSpace) -> Result<Self> {
         Ok(Self {
-            store: DataStore::<Chunk>::new(path, used_space).await?,
+            store: DataStore::<Chunk>::new(path, Path::new("chunks"), used_space).await?,
         })
     }
 

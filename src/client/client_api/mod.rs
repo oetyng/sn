@@ -9,6 +9,7 @@
 mod blob_apis;
 mod blob_storage;
 mod commands;
+mod file_manager;
 mod map_apis;
 mod queries;
 mod register_apis;
