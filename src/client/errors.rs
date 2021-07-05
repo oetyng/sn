@@ -127,7 +127,9 @@ pub enum Error {
 
 impl From<(CmdError, MessageId)> for Error {
     fn from((error, msg_id): (CmdError, MessageId)) -> Self {
-        let CmdError::Data(source) = error;
+        let source = match error {
+            CmdError::Data(source) | CmdError::Payment(source) => source,
+        };
         Error::ErrorMessage { source, msg_id }
     }
 }

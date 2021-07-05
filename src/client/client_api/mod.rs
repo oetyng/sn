@@ -13,10 +13,15 @@ mod queries;
 mod register_apis;
 
 use crate::client::{config_handler::Config, connections::Session, errors::Error};
-use crate::messaging::data::{CmdError, DataCmd};
+use crate::messaging::cmd::ChargedOps;
+use crate::messaging::data::{CmdError, DataCmd, DataMsg, ProcessMsg};
+use crate::messaging::payment::{CostInquiry, GuaranteedQuote, PaymentReceipt, PointerEditHash};
+use crate::messaging::query::Query;
+use crate::messaging::{DataSigned, WireMsg};
 use crate::types::{Chunk, ChunkAddress, Keypair, PublicKey};
 use lru::LruCache;
 use rand::rngs::OsRng;
+use std::collections::BTreeSet;
 use std::{
     path::Path,
     {collections::HashSet, net::SocketAddr, sync::Arc},
@@ -130,8 +135,49 @@ impl Client {
 
     // Private helper to obtain payment proof for a data command, send it to the network,
     // and also apply the payment to local replica actor.
-    async fn pay_and_send_data_command(&self, cmd: DataCmd) -> Result<(), Error> {
+    async fn pay_and_send_data_command(&self, cmds: BTreeSet<DataCmd>) -> Result<(), Error> {
+        // Get quote for write
+        let quote = self.get_quote(cmds).await?;
+        // Generate payment matching the quote
+        let payment = self.generate_payment(quote).await?;
+
+        // The _actual_ message
+        let cmd = ChargedOps {
+            uploads: Vec::new(),
+            edits: Vec::new(),
+            payment: payment,
+        };
+
+        // Send the message to the network
         self.send_cmd(cmd).await
+    }
+
+    ///
+    pub async fn get_quote(&self, inquiry: CostInquiry) -> Result<GuaranteedQuote, Error> {
+        let payment_xorname = inquiry.payment_xorname().map_err(|e| Error::NoResponse)?;
+
+        self.session.send_get_section_query(payment_xorname).await;
+        let msg = DataMsg::Process(ProcessMsg::Query(Query::Payment(inquiry)));
+        let serialized = WireMsg::serialize_msg_payload(&msg)?;
+
+        let client_signed = DataSigned {
+            public_key: self.keypair.public_key(),
+            signature: self.keypair.sign(&serialized),
+        };
+
+        self.session
+            .send_inquiry(serialized, payment_xorname, client_signed);
+        unimplemented!()
+    }
+
+    ///
+    pub async fn generate_payment(&self, _quote: GuaranteedQuote) -> Result<PaymentReceipt, Error> {
+        unimplemented!()
+        // Ok(PaymentReceipt {
+        //     data: BTreeSet::new(),
+        //     sig,
+        //     key_set,
+        // })
     }
 
     #[cfg(test)]

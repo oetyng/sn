@@ -17,19 +17,19 @@ mod messaging;
 mod msg_handling;
 mod split_barrier;
 
-use crate::dbs::UsedSpace;
-use crate::node::RegisterStorage;
+pub(crate) use crate::messaging::signature_aggregator::SignatureAggregator;
 pub(crate) use bootstrap::{join_network, JoiningAsRelocated};
 pub(crate) use comm::{Comm, ConnectionEvent, SendStatus};
 
 use self::{
     enduser_registry::EndUserRegistry, message_filter::MessageFilter, split_barrier::SplitBarrier,
 };
+use crate::dbs::UsedSpace;
 use crate::messaging::{
     node::{Network, NodeMsg, Proposal, Section, SectionAuth},
-    signature_aggregator::SignatureAggregator,
     MessageId, SectionAuthorityProvider,
 };
+use crate::node::RegisterStorage;
 use crate::routing::{
     dkg::{DkgVoter, ProposalAggregator},
     error::Result,

@@ -25,8 +25,13 @@ pub use self::{
     query::DataQuery,
     register::{RegisterCmd, RegisterRead, RegisterWrite},
 };
-
-use crate::messaging::{data::Error as ErrorMessage, MessageId};
+use super::{
+    cmd::Cmd,
+    data::Error as ErrorMessage,
+    payment::{GuaranteedQuoteShare, PaymentReceiptShare},
+    query::Query,
+    MessageId,
+};
 use crate::types::{
     register::{Entry, EntryHash, Permissions, Policy, Register},
     Chunk, PublicKey,
@@ -58,13 +63,20 @@ pub enum ServiceMsg {
     /// There will be no response to these messages on success, only if something went wrong. Due to
     /// the eventually consistent nature of the network, it may be necessary to continually retry
     /// operations that depend on the effects of mutations.
-    Cmd(DataCmd),
+    Cmd(Cmd),
+    /// An Event is a fact about something that happened.
+    Event {
+        /// The event.
+        event: Event,
+        /// ID of causing cmd.
+        correlation_id: MessageId,
+    },
     /// A read-only operation.
     ///
     /// Senders should eventually receive either a corresponding [`QueryResponse`] or an error in
     /// reply.
     /// [`QueryResponse`]: Self::QueryResponse
-    Query(DataQuery),
+    Query(Query),
     /// The response to a query, containing the query result.
     QueryResponse {
         /// The result of the query.
@@ -93,11 +105,20 @@ pub enum ServiceMsg {
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum CmdError {
     /// An error response to a [`DataCmd`].
-    // FIXME: `Cmd` is not an enum, so should this be?
     Data(Error), // DataError enum for better differentiation?
+    ///
+    Payment(Error),
 }
 
-/// The response to a query, containing the query result.
+/// Events from the network that
+/// are pushed to the client.
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub enum Event {
+    /// Event from an elder to be aggregated, raised on RegisterPayment success.
+    PaymentReceived(PaymentReceiptShare),
+}
+
+/// Query responses from the network.
 #[allow(clippy::large_enum_variant, clippy::type_complexity)]
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub enum QueryResponse {
@@ -119,6 +140,8 @@ pub enum QueryResponse {
     GetRegisterPolicy(Result<Policy>),
     /// Response to [`RegisterRead::GetUserPermissions`].
     GetRegisterUserPermissions(Result<Permissions>),
+    /// Get a quote for payment, with a guaranteed cost.
+    GetQuote(Result<GuaranteedQuoteShare>),
 }
 
 impl QueryResponse {
@@ -126,6 +149,7 @@ impl QueryResponse {
     pub fn is_success(&self) -> bool {
         use QueryResponse::*;
         match self {
+            GetQuote(result) => result.is_ok(),
             GetChunk(result) => result.is_ok(),
             GetRegister(result) => result.is_ok(),
             GetRegisterOwner(result) => result.is_ok(),
@@ -140,6 +164,10 @@ impl QueryResponse {
         use QueryResponse::*;
 
         match self {
+            GetQuote(result) => match result {
+                Ok(_) => false,
+                Err(error) => matches!(*error, ErrorMessage::DataNotFound(_)),
+            },
             GetChunk(result) => match result {
                 Ok(_) => false,
                 Err(error) => matches!(*error, ErrorMessage::DataNotFound(_)),
@@ -241,8 +269,8 @@ mod tests {
 
     #[test]
     fn generate_service_error() {
-        let msg = ServiceMsg::Query(DataQuery::Blob(ChunkRead::Get(ChunkAddress::Private(
-            XorName::random(),
+        let msg = ServiceMsg::Query(Query::Data(DataQuery::Blob(ChunkRead::Get(
+            ChunkAddress::Private(XorName::random()),
         ))));
         let random_addr = DataAddress::Chunk(ChunkAddress::Public(XorName::random()));
         let lazy_error = ServiceError {
@@ -261,9 +289,9 @@ mod tests {
         let random_addr = DataAddress::Chunk(chunk_addr);
         let errored_response = ServiceError {
             reason: Some(Error::DataNotFound(random_addr.clone())),
-            source_message: Some(Box::new(ServiceMsg::Query(DataQuery::Blob(
+            source_message: Some(Box::new(ServiceMsg::Query(Query::Data(DataQuery::Blob(
                 ChunkRead::Get(chunk_addr),
-            )))),
+            ))))),
         };
 
         assert!(format!("{:?}", errored_response).contains("Blob(Get(Public"));

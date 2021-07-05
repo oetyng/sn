@@ -10,13 +10,14 @@ use super::{
     interaction::push_state,
     messaging::{send, send_error, send_to_nodes},
     role::{AdultRole, ElderRole, Role},
+    Node,
 };
 use crate::messaging::MessageId;
 use crate::node::{
     chunk_store::ChunkStore,
     event_mapping::MsgContext,
     node_ops::{NodeDuties, NodeDuty},
-    Error, Node, Result,
+    Error, Result,
 };
 use crate::routing::ELDER_SIZE;
 use std::sync::Arc;
@@ -187,6 +188,25 @@ impl Node {
                     chunks: Arc::new(store),
                 });
                 Ok(NodeTask::None)
+            }
+            //
+            NodeDuty::ProcessInquiry {
+                inquiry,
+                msg_id,
+                origin,
+            } => {
+                let elder = self.as_elder().await?.clone();
+                let handle = tokio::spawn(async move {
+                    Ok(NodeTask::from(vec![
+                        elder
+                            .payments
+                            .read()
+                            .await
+                            .inquire(inquiry, msg_id, origin)
+                            .await,
+                    ]))
+                });
+                Ok(NodeTask::Thread(handle))
             }
             //
             // -------- Immutable chunks --------
@@ -372,6 +392,25 @@ impl Node {
                     some_other_error => Err(some_other_error),
                 },
             },
+            NodeDuty::ProcessOps {
+                ops,
+                msg_id,
+                origin,
+                ..
+            } => {
+                let elder = self.as_elder().await?.clone();
+                let handle = tokio::spawn(async move {
+                    Ok(NodeTask::from(vec![
+                        elder
+                            .payments
+                            .read()
+                            .await
+                            .verify_ops_paid(ops, msg_id, origin)
+                            .await?,
+                    ]))
+                });
+                Ok(NodeTask::Thread(handle))
+            }
             NodeDuty::NoOp => Ok(NodeTask::None),
         }
     }

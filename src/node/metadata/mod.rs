@@ -13,6 +13,7 @@ mod elder_stores;
 mod register_storage;
 
 use crate::messaging::{
+    cmd::Cmd,
     data::{CmdError, DataCmd, DataExchange, DataQuery, QueryResponse, ServiceMsg},
     node::NodeMsg,
     AuthorityProof, DstLocation, EndUser, MessageId, ServiceAuth, WireMsg,
@@ -194,7 +195,7 @@ fn build_client_error_response(error: CmdError, msg_id: MessageId, origin: EndUs
 }
 
 // TODO: verify earlier so that this isn't needed
-fn verify_op(auth: ServiceAuth, cmd: DataCmd) -> Result<AuthorityProof<ServiceAuth>> {
+fn verify_op(auth: ServiceAuth, cmd: Cmd) -> Result<AuthorityProof<ServiceAuth>> {
     let message = ServiceMsg::Cmd(cmd);
     let payload = WireMsg::serialize_msg_payload(&message)?;
     Ok(AuthorityProof::verify(auth, &payload)?)

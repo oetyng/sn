@@ -13,6 +13,8 @@ use tracing::{debug, error, info, trace, warn};
 use xor_name::XorName;
 
 use crate::client::Error;
+use crate::messaging::data::{GuaranteedQuote, GuaranteedQuoteShare};
+use crate::messaging::node::SigShare;
 use crate::messaging::{
     data::{CmdError, ServiceMsg},
     section_info::{GetSectionResponse, SectionInfoMsg},
@@ -170,6 +172,7 @@ impl Session {
     async fn handle_client_msg(&self, msg_id: MessageId, msg: ServiceMsg, src: SocketAddr) {
         debug!("ServiceMsg with id {:?} received from {:?}", msg_id, src);
         let queries = self.pending_queries.clone();
+        let inquiry_queries = self.pending_inquiries.clone();
         let error_sender = self.incoming_err_sender.clone();
 
         let _ = tokio::spawn(async move {
@@ -198,6 +201,25 @@ impl Session {
                         trace!("No channel found for {:?}", correlation_id);
                     }
                 }
+                ServiceMsg::InquiryResponse(guaranteed_share) => {
+                    let sig_share = SigShare {
+                        public_key_set: guaranteed_share.key_set,
+                        index: guaranteed_share.sig.index,
+                        signature_share: guaranteed_share.sig.share,
+                    };
+                    let serialized = bincode::serialize(&guaranteed_share.quote)?;
+                    match self.aggregate_incoming_message(serialized, sig_share) {
+                        Ok(Some(aggregated)) => {
+                            let guaranteed_quote: GuaranteedQuote =
+                                bincode::deserialize(&aggregated)?;
+                            inquiry_queries.read().await.get()
+                        }
+                        Err(AggregatorError::NotEnoughShares) => {}
+                        Err(e) => {
+                            error!("Error aggregated GuaranteedQuoteShare: {:?}", e)
+                        }
+                    }
+                }
                 ServiceMsg::CmdError {
                     error,
                     correlation_id,
@@ -211,7 +233,7 @@ impl Session {
                     let _ = error_sender.send(error.clone()).await;
 
                     match error {
-                        CmdError::Data(_error) => {
+                        CmdError::Data(_error) | CmdError::Payment(_error) => {
                             // do nothing just yet
                         }
                     }

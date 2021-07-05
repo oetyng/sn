@@ -106,7 +106,7 @@ impl Comm {
                 .await
                 .map_err(|err| {
                     error!(
-                        "Sending message (msg_id: {}) to {:?} (name {:?}) failed with {}",
+                        "Sending message (msg_id: {}) to {:?} (name {:?}) failed with {:?}",
                         wire_msg.msg_id(),
                         addr,
                         name,
@@ -139,7 +139,7 @@ impl Comm {
             .is_reachable(peer)
             .await
             .map_err(|err| {
-                info!("Peer {} is NOT externally reachable: {}", peer, err);
+                info!("Peer {} is NOT externally reachable: {:?}", peer, err);
                 Error::AddressNotReachable { err }
             })
             .map(|()| {

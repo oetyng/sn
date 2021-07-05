@@ -34,6 +34,9 @@ pub enum Error {
     /// Database error.
     #[error("Database error:: {0}")]
     Database(#[from] dbs::Error),
+    /// Not enough storage available on the network.
+    #[error("Not enough storage available on the network")]
+    NetworkFull,
     /// Not Section PublicKey.
     #[error("Not section public key returned from routing")]
     NoSectionPublicKey,

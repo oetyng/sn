@@ -7,11 +7,13 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::{
+    cmd::ChargedOps,
     data::{
         ChunkRead, ChunkWrite, DataCmd, DataExchange, DataQuery, QueryResponse, ServiceError,
         ServiceMsg,
     },
     node::NodeMsg,
+    payment::{CostInquiry, RegisterPayment},
     AuthorityProof, DstLocation, EndUser, MessageId, ServiceAuth,
 };
 use crate::routing::Prefix;
@@ -127,6 +129,16 @@ pub enum NodeDuty {
         targets: BTreeSet<XorName>,
         aggregation: bool,
     },
+    ProcessInquiry {
+        inquiry: CostInquiry,
+        msg_id: MessageId,
+        origin: EndUser,
+    },
+    ProcessPayment {
+        payment: RegisterPayment,
+        msg_id: MessageId,
+        origin: EndUser,
+    },
     /// Process read of data
     ProcessRead {
         msg_id: MessageId,
@@ -134,10 +146,17 @@ pub enum NodeDuty {
         auth: AuthorityProof<ServiceAuth>,
         origin: EndUser,
     },
-    /// Process write of data
+    /// Process write of data (TO BE DEPRECATED)
     ProcessWrite {
         msg_id: MessageId,
         cmd: DataCmd,
+        auth: AuthorityProof<ServiceAuth>,
+        origin: EndUser,
+    },
+    /// Process paid ops
+    ProcessOps {
+        ops: ChargedOps,
+        msg_id: MessageId,
         auth: AuthorityProof<ServiceAuth>,
         origin: EndUser,
     },

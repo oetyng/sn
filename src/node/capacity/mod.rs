@@ -7,14 +7,18 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 mod adult_storage_info;
+mod op_cost;
 
 use crate::node::metadata::adult_reader::AdultReader;
 use crate::routing::{Prefix, XorName};
 pub(super) use adult_storage_info::AdultsStorageInfo;
+pub use op_cost::OpCost;
 use std::collections::BTreeSet;
 
+pub const MAX_SUPPLY: u64 = u32::MAX as u64 * 1_000_000_000_u64;
 // The number of separate copies of a blob chunk which should be maintained.
-pub(super) const CHUNK_COPY_COUNT: usize = 4;
+pub(crate) const CHUNK_COPY_COUNT: usize = 4;
+pub(crate) const MAX_CHUNK_SIZE: u64 = 1_000_000;
 
 /// A util for sharing the
 /// info on data capacity among the

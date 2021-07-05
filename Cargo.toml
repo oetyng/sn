@@ -86,6 +86,11 @@ version = "0.16.0"
 default-features = false
 features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls"]
 
+[dependencies.sn_dbc]
+git = "https://github.com/oetyng/sn_dbc"
+#  path = "../sn_dbc"
+branch = "integrate-to-sn"
+
 [dependencies.tokio]
 version = "1.8.0"
 features = ["fs", "io-util", "macros", "rt", "rt-multi-thread", "sync"]

@@ -13,6 +13,7 @@ use crate::types::{
 };
 use crate::{
     messaging::{
+        cmd::Cmd,
         data::{
             DataCmd, QueryResponse, RegisterCmd, RegisterDataExchange, RegisterRead, RegisterWrite,
         },
@@ -102,8 +103,11 @@ impl RegisterStorage {
         // todo: make outer loop parallel
         for (_, history) in data {
             for op in history {
-                let auth = super::verify_op(op.auth.clone(), DataCmd::Register(op.write.clone()))
-                    .map_err(|_| {
+                let auth = super::verify_op(
+                    op.auth.clone(),
+                    Cmd::Data(DataCmd::Register(op.write.clone())),
+                )
+                .map_err(|_| {
                     Error::Logic("Received register operation signature is invalid".to_string())
                 })?;
                 let _ = self.apply(op, auth)?;

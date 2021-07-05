@@ -8,7 +8,9 @@
 
 use super::{Mapping, MsgContext};
 use crate::messaging::{
+    cmd::Cmd,
     data::{ServiceError, ServiceMsg},
+    query::Query,
     AuthorityProof, DstLocation, EndUser, MessageId, ServiceAuth, SrcLocation,
 };
 use crate::node::{
@@ -41,16 +43,32 @@ fn map_client_service_msg(
     auth: AuthorityProof<ServiceAuth>,
 ) -> NodeDuty {
     match service_msg {
-        ServiceMsg::Query(query) => NodeDuty::ProcessRead {
+        ServiceMsg::Query(Query::Data(query)) => NodeDuty::ProcessRead {
             query,
             msg_id,
             auth,
             origin,
         },
-        ServiceMsg::Cmd(cmd) => NodeDuty::ProcessWrite {
+        ServiceMsg::Query(Query::Payment(inquiry)) => NodeDuty::ProcessInquiry {
+            inquiry,
+            msg_id,
+            origin,
+        },
+        ServiceMsg::Cmd(Cmd::Data(cmd)) => NodeDuty::ProcessWrite {
             cmd,
             msg_id,
             auth,
+            origin,
+        },
+        ServiceMsg::Cmd(Cmd::DataDbc(ops)) => NodeDuty::ProcessOps {
+            ops,
+            msg_id,
+            auth,
+            origin,
+        },
+        ServiceMsg::Cmd(Cmd::Payment(payment)) => NodeDuty::ProcessPayment {
+            payment,
+            msg_id,
             origin,
         },
         ServiceMsg::QueryResponse {

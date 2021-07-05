@@ -33,8 +33,10 @@ mod listeners;
 mod messaging;
 
 type QueryResponseSender = Sender<QueryResponse>;
+type InquiryResponseSender = Sender<GuaranteedQuoteShare>;
 
 type PendingQueryResponses = Arc<RwLock<HashMap<MessageId, QueryResponseSender>>>;
+type PendingInquiryResponses = Arc<RwLock<HashMap<MessageId, InquiryResponseSender>>>;
 
 pub(crate) struct QueryResult {
     pub(super) response: QueryResponse,
@@ -47,6 +49,7 @@ pub(super) struct Session {
     pub(super) section_key_set: Arc<RwLock<Option<PublicKeySet>>>,
     qp2p: QuicP2p,
     pending_queries: PendingQueryResponses,
+    pending_inquiries: PendingInquiryResponses,
     incoming_err_sender: Arc<Sender<CmdError>>,
     endpoint: Option<Endpoint>,
     /// Elders of our section
@@ -56,6 +59,7 @@ pub(super) struct Session {
     section_prefix: Arc<RwLock<Option<Prefix>>>,
     aggregator: Arc<RwLock<SignatureAggregator>>,
     is_connecting_to_new_elders: bool,
+    aggregator: SignatureAggregator,
 }
 
 impl Session {
@@ -71,6 +75,7 @@ impl Session {
             client_pk,
             qp2p,
             pending_queries: Arc::new(RwLock::new(HashMap::default())),
+            pending_inquiries: Arc::new(RwLock::new(HashMap::default())),
             incoming_err_sender: Arc::new(err_sender),
             endpoint: None,
             section_key_set: Arc::new(RwLock::new(None)),
@@ -79,6 +84,7 @@ impl Session {
             section_prefix: Arc::new(RwLock::new(None)),
             aggregator: Arc::new(RwLock::new(SignatureAggregator::new())),
             is_connecting_to_new_elders: false,
+            aggregator: SignatureAggregator::new(),
         })
     }
 

@@ -18,10 +18,16 @@
 //! - The [`section_info`] module defines the queries and responses for section information – these
 //!   may be sent by both clients and nodes.
 
+///
+pub mod cmd;
 /// Data messages that clients and nodes can send.
 pub mod data;
 /// Messages that nodes can exchange on the network.
 pub mod node;
+/// Payment messages that clients and nodes can send.
+pub mod payment;
+///
+pub mod query;
 /// Queries and responses for section information.
 pub mod section_info;
 /// The wire format and message (de)serialization API.

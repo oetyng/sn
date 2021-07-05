@@ -8,10 +8,14 @@
 
 use super::Core;
 use crate::dbs::Error as DbError;
-use crate::messaging::data::ServiceMsg;
 use crate::messaging::{
-    data::{CmdError, DataCmd, DataQuery, Error as ErrorMessage, RegisterRead, RegisterWrite},
+    cmd::Cmd,
+    data::{
+        CmdError, DataCmd, DataQuery, Error as ErrorMessage, RegisterRead, RegisterWrite,
+        ServiceMsg,
+    },
     node::NodeMsg,
+    query::Query,
     AuthorityProof, DstLocation, EndUser, MessageId, MsgKind, ServiceAuth, WireMsg,
 };
 use crate::routing::{
@@ -115,11 +119,11 @@ impl Core {
         auth: AuthorityProof<ServiceAuth>,
     ) -> Result<Vec<Command>> {
         match msg {
-            ServiceMsg::Cmd(DataCmd::Register(register_cmd)) => {
+            ServiceMsg::Cmd(Cmd::Data(DataCmd::Register(register_cmd))) => {
                 self.handle_register_cmd(msg_id, register_cmd, user, auth)
                     .await
             }
-            ServiceMsg::Query(DataQuery::Register(read)) => {
+            ServiceMsg::Query(Query::Data(DataQuery::Register(read))) => {
                 self.handle_register_read(msg_id, read, user, auth)
             }
             _ => {

@@ -10,9 +10,9 @@ use super::{
     blob_storage::{BlobStorage, BlobStorageDryRun},
     Client,
 };
-use crate::client::Error;
 use crate::messaging::data::{ChunkRead, ChunkWrite, DataCmd, DataQuery, QueryResponse};
 use crate::types::{Chunk, ChunkAddress, PrivateChunk, PublicChunk, PublicKey};
+use crate::client::Error;
 use bincode::{deserialize, serialize};
 use self_encryption::{DataMap, SelfEncryptor};
 use serde::{Deserialize, Serialize};
@@ -151,7 +151,7 @@ impl Client {
         address: ChunkAddress,
     ) -> Result<(), Error> {
         let cmd = DataCmd::Chunk(ChunkWrite::DeletePrivate(address));
-        self.pay_and_send_data_command(cmd).await?;
+        // self.pay_and_send_data_command(cmd).await?;
 
         Ok(())
     }
@@ -164,7 +164,7 @@ impl Client {
             return Err(Error::NetworkDataError(crate::types::Error::ExceededSize));
         }
         let cmd = DataCmd::Chunk(ChunkWrite::New(chunk));
-        self.pay_and_send_data_command(cmd).await?;
+        // self.pay_and_send_data_command(cmd).await?;
         Ok(())
     }
 

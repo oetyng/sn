@@ -8,8 +8,10 @@
 
 use super::{Mapping, MsgContext};
 use crate::messaging::{
+    cmd::Cmd,
     data::{DataCmd, QueryResponse, ServiceMsg},
     node::{NodeCmd, NodeMsg, NodeQuery, NodeQueryResponse},
+    query::Query,
     AuthorityProof, DstLocation, MessageId, ServiceAuth, SrcLocation, WireMsg,
 };
 use crate::node::{
@@ -77,7 +79,12 @@ fn match_node_msg(msg_id: MessageId, msg: MessageReceived, origin: SrcLocation) 
             query,
             auth,
             origin: query_origin,
-        }) => match verify_authority(msg_id, origin, auth, ServiceMsg::Query(query.clone())) {
+        }) => match verify_authority(
+            msg_id,
+            origin,
+            auth,
+            ServiceMsg::Query(Query::Data(query.clone())),
+        ) {
             Ok(auth) => NodeDuty::ProcessRead {
                 query,
                 msg_id,
@@ -90,7 +97,12 @@ fn match_node_msg(msg_id: MessageId, msg: MessageReceived, origin: SrcLocation) 
             cmd,
             auth,
             origin: cmd_origin,
-        }) => match verify_authority(msg_id, origin, auth, ServiceMsg::Cmd(cmd.clone())) {
+        }) => match verify_authority(
+            msg_id,
+            origin,
+            auth,
+            ServiceMsg::Cmd(Cmd::Data(cmd.clone())),
+        ) {
             Ok(auth) => NodeDuty::ProcessWrite {
                 cmd,
                 msg_id,
@@ -110,7 +122,7 @@ fn match_node_msg(msg_id: MessageId, msg: MessageReceived, origin: SrcLocation) 
                 msg_id,
                 origin,
                 auth,
-                ServiceMsg::Cmd(DataCmd::Chunk(cmd.clone())),
+                ServiceMsg::Cmd(Cmd::Data(DataCmd::Chunk(cmd.clone()))),
             ) {
                 Ok(auth) => NodeDuty::WriteChunk {
                     write: cmd,

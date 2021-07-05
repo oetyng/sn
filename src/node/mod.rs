@@ -20,6 +20,7 @@ mod metadata;
 mod network;
 mod node_api;
 mod node_ops;
+mod payments;
 
 /// TODO: make these internal only once routing/node are collapsed
 /// Storage interface for register data type

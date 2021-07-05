@@ -40,6 +40,9 @@ use register::Register;
 use serde::{Deserialize, Serialize};
 use xor_name::XorName;
 
+/// The age of a node is the number of times relocated.
+pub type NodeAge = u8;
+
 /// Object storing a data variant.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Debug)]

@@ -6,22 +6,29 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::node::metadata::Metadata;
+use crate::node::{metadata::Metadata, node_api::BlsKeyManager, payments::Payments};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub(crate) struct ElderRole {
     // data operations
-    pub(crate) meta_data: Arc<RwLock<Metadata>>,
+    pub meta_data: Arc<RwLock<Metadata>>,
+    // payments
+    pub payments: Arc<RwLock<Payments<BlsKeyManager>>>,
     // denotes if we received initial sync
     pub(crate) received_initial_sync: Arc<RwLock<bool>>,
 }
 
 impl ElderRole {
-    pub(crate) fn new(meta_data: Metadata, received_initial_sync: bool) -> Self {
+    pub fn new(
+        meta_data: Metadata,
+        payments: Payments<BlsKeyManager>,
+        received_initial_sync: bool,
+    ) -> Self {
         ElderRole {
             meta_data: Arc::new(RwLock::new(meta_data)),
+            payments: Arc::new(RwLock::new(payments)),
             received_initial_sync: Arc::new(RwLock::new(received_initial_sync)),
         }
     }
