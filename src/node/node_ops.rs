@@ -6,11 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::messaging::client::ClientMsg;
 use crate::messaging::{
     client::{
-        ChunkRead, ChunkWrite, ClientSig, DataCmd, DataExchange, DataQuery, ProcessingError,
-        QueryResponse, SupportingInfo,
+        ChunkRead, ChunkWrite, ClientMsg, ClientSig, CostInquiry, DataCmd, DataExchange, DataQuery,
+        DebitableOp, ProcessingError, QueryResponse, SupportingInfo,
     },
     node::NodeMsg,
     Aggregation, DstLocation, EndUser, MessageId, SrcLocation,
@@ -137,6 +136,11 @@ pub enum NodeDuty {
         targets: BTreeSet<XorName>,
         aggregation: Aggregation,
     },
+    ProcessInquiry {
+        inquiry: CostInquiry,
+        msg_id: MessageId,
+        origin: EndUser,
+    },
     /// Process read of data
     ProcessRead {
         query: DataQuery,
@@ -146,8 +150,15 @@ pub enum NodeDuty {
     },
     /// Process write of data
     ProcessWrite {
-        cmd: DataCmd,
+        op: DataCmd,
         msg_id: MessageId,
+        client_sig: ClientSig,
+        origin: EndUser,
+    },
+    /// Process Payment for a DataCmd
+    ProcessDataPayment {
+        id: MessageId,
+        cmd: DebitableOp,
         client_sig: ClientSig,
         origin: EndUser,
     },
@@ -179,6 +190,7 @@ impl Debug for NodeDuty {
             Self::ReadChunk { .. } => write!(f, "ReadChunk"),
             Self::WriteChunk { .. } => write!(f, "WriteChunk"),
             Self::ProcessRepublish { .. } => write!(f, "ProcessRepublish"),
+            Self::ProcessDataPayment { .. } => write!(f, "ProcessDataPayment"),
             Self::RecordAdultReadLiveness {
                 correlation_id,
                 response,
@@ -212,6 +224,7 @@ impl Debug for NodeDuty {
                 "SendToNodes [ msg: {:?}, targets: {:?}, aggregation: {:?} ]",
                 msg, targets, aggregation
             ),
+            Self::ProcessInquiry { .. } => write!(f, "ProcessInquiry"),
             Self::ProcessRead { .. } => write!(f, "ProcessRead"),
             Self::ProcessWrite { .. } => write!(f, "ProcessWrite"),
             Self::ReplicateChunk { .. } => write!(f, "ReplicateChunk"),

@@ -19,6 +19,7 @@ mod metadata;
 mod network;
 mod node_api;
 mod node_ops;
+mod payments;
 
 /// Docs
 pub mod state_db;

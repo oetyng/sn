@@ -6,7 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::data::DataCmd;
+use super::payment::DebitableOp;
 use serde::{Deserialize, Serialize};
 use xor_name::XorName;
 
@@ -15,10 +15,7 @@ use xor_name::XorName;
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Cmd {
     /// Commands for manipulating data
-    Data {
-        /// The data command struct itself
-        cmd: DataCmd,
-    },
+    Debitable(DebitableOp),
 }
 
 impl Cmd {
@@ -26,7 +23,7 @@ impl Cmd {
     pub fn dst_address(&self) -> XorName {
         use Cmd::*;
         match self {
-            Data { cmd, .. } => cmd.dst_address(),
+            Debitable(_cmd) => XorName::random(), // cmd.dst_address(),
         }
     }
 }

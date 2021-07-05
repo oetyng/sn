@@ -71,16 +71,16 @@ fn map_client_process_msg(process_msg: ProcessMsg, origin: EndUser) -> NodeDuty 
             origin,
         },
         ProcessMsg::Cmd {
-            cmd: Cmd::Data { cmd, .. },
+            cmd: Cmd::Debitable(cmd),
             id,
             client_sig,
             ..
         } =>
         // FIXME: ******** validate client signature!!!! *********
         {
-            NodeDuty::ProcessWrite {
+            NodeDuty::ProcessDataPayment {
                 cmd,
-                msg_id: id,
+                id,
                 client_sig,
                 origin,
             }

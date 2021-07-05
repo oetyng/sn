@@ -76,6 +76,10 @@ exponential-backoff = "1.0.0"
 async-recursion = "0.3.2"
 sled = "0.34.6"
 
+  [dependencies.sn_dbc]
+  git = "https://github.com/oetyng/sn_dbc"
+  branch = "impl-async-keymanager"
+
   [dependencies.ed25519-dalek]
   version = "1.0.0"
   features = [ "serde" ]

@@ -6,15 +6,24 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use super::role::{ElderRole, Role};
 use crate::messaging::client::DataExchange;
+use crate::node::capacity::OpCost;
+use crate::node::payments::Payments;
 use crate::node::{
     capacity::{AdultsStorageInfo, Capacity, CapacityReader, CapacityWriter},
     metadata::{adult_reader::AdultReader, Metadata},
+    node_api::BlsKeyManager,
     node_ops::NodeDuty,
     Node, Result,
 };
+use crate::types::{NodeAge, PublicKey};
+use sn_dbc::Mint;
 use tracing::info;
+use xor_name::XorName;
 
 impl Node {
     /// Level up a newbie to an oldie on promotion
@@ -33,6 +42,17 @@ impl Node {
             capacity.clone(),
         )
         .await?;
+
+        //
+        // start handling payments
+        let store_cost = OpCost::new(self.network_api.clone(), capacity_reader.clone());
+        let reward_wallets = crate::node::payments::RewardWallets::new(BTreeMap::<
+            XorName,
+            (NodeAge, PublicKey),
+        >::new());
+        let key_mgr = BlsKeyManager::new(self.network_api.clone());
+        // let mint = Mint::new(Arc::new(key_mgr));
+        // let payments = Payments::new(store_cost, reward_wallets, mint);
 
         *self.role.write().await = Role::Elder(ElderRole::new(meta_data, false));
 

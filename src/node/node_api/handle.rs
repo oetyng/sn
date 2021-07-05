@@ -16,7 +16,7 @@ use crate::node::{
     chunk_store::ChunkStore,
     event_mapping::MsgContext,
     node_ops::{NodeDuties, NodeDuty},
-    Node, Result,
+    Result,
 };
 use crate::routing::ELDER_SIZE;
 use std::sync::Arc;
@@ -199,6 +199,25 @@ impl Node {
                 Ok(NodeTask::None)
             }
             //
+            NodeDuty::ProcessInquiry {
+                inquiry,
+                msg_id,
+                origin,
+            } => {
+                let elder = self.role.as_elder_mut()?.clone();
+                let handle = tokio::spawn(async move {
+                    Ok(NodeTask::from(
+                        elder
+                            .payments
+                            .read()
+                            .await
+                            .inquire(inquiry, msg_id, origin)
+                            .await,
+                    ))
+                });
+                Ok(NodeTask::Thread(handle))
+            }
+            //
             // -------- Immutable chunks --------
             NodeDuty::ReadChunk { read, msg_id } => {
                 let adult = self.as_adult().await?;
@@ -332,7 +351,7 @@ impl Node {
                 Ok(NodeTask::Thread(handle))
             }
             NodeDuty::ProcessWrite {
-                cmd,
+                op,
                 msg_id,
                 origin,
                 client_sig,
@@ -344,7 +363,7 @@ impl Node {
                             .meta_data
                             .write()
                             .await
-                            .write(cmd, msg_id, client_sig, origin)
+                            .write(op, msg_id, client_sig, origin)
                             .await?,
                     ]))
                 });
@@ -366,6 +385,25 @@ impl Node {
                             .record_adult_read_liveness(correlation_id, response, src)
                             .await?,
                     ))
+                });
+                Ok(NodeTask::Thread(handle))
+            }
+            NodeDuty::ProcessDataPayment {
+                id,
+                cmd,
+                client_sig,
+                origin,
+            } => {
+                let elder = self.role.as_elder_mut()?.clone();
+                let handle = tokio::spawn(async move {
+                    Ok(NodeTask::from(vec![
+                        elder
+                            .payments
+                            .write()
+                            .await
+                            .process_op(cmd, client_sig, id, origin)
+                            .await?,
+                    ]))
                 });
                 Ok(NodeTask::Thread(handle))
             }

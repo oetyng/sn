@@ -24,14 +24,14 @@ use crate::node::{
     state_db::{get_reward_pk, store_new_reward_keypair},
     Config, Error, Result,
 };
-use crate::routing::{
-    EventStream, {Prefix, XorName},
-};
+use crate::routing::EventStream;
 use crate::types::PublicKey;
+use async_trait::async_trait;
 use futures::{future::BoxFuture, lock::Mutex, stream::FuturesUnordered, FutureExt, StreamExt};
 use handle::NodeTask;
 use rand::rngs::OsRng;
 use role::{AdultRole, Role};
+use sn_dbc::{Hash, KeyManager, NodeSignature, Signature};
 use std::sync::Arc;
 use std::{
     fmt::{self, Display, Formatter},
@@ -42,6 +42,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{error, warn};
+use xor_name::{Prefix, XorName};
 
 const JOINING_TIMEOUT: u64 = 180; // 180 seconds
 
@@ -58,6 +59,52 @@ impl NodeInfo {
     ///
     pub fn path(&self) -> &Path {
         self.root_dir.as_path()
+    }
+}
+
+///
+pub struct BlsKeyManager {
+    network: Network,
+}
+
+impl BlsKeyManager {
+    pub fn new(network: Network) -> Self {
+        Self { network }
+    }
+}
+
+#[async_trait]
+impl KeyManager for BlsKeyManager {
+    type Error = Error;
+
+    async fn sign(&self, msg_hash: &Hash) -> Result<NodeSignature> {
+        let (index, sig) = self.network.sign_bytes_as_elder_raw(&(*msg_hash)).await?;
+        Ok(NodeSignature::new(index as u64, sig))
+    }
+
+    async fn public_key_set(&self) -> Result<bls::PublicKeySet> {
+        self.network.our_public_key_set().await
+    }
+
+    async fn verify(
+        &self,
+        msg_hash: &Hash,
+        key: &bls::PublicKey,
+        signature: &Signature,
+    ) -> Result<()> {
+        self.verify_known_key(&key)
+            .await
+            .map_err(|e| Error::InvalidOperation(e.to_string()))?;
+        if key.verify(signature, *msg_hash) {
+            Ok(())
+        } else {
+            Err(Error::InvalidOperation("Invalid signature.".to_string()))
+        }
+    }
+
+    async fn verify_known_key(&self, _key: &bls::PublicKey) -> Result<()> {
+        Ok(())
+        //self.network.known_key(name)
     }
 }
 
