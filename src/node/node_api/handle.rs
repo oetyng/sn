@@ -10,6 +10,7 @@ use super::{
     interaction::push_state,
     messaging::{send, send_error, send_support, send_to_nodes},
     role::{AdultRole, ElderRole, Role},
+    Node,
 };
 use crate::messaging::MessageId;
 use crate::node::{
@@ -204,16 +205,16 @@ impl Node {
                 msg_id,
                 origin,
             } => {
-                let elder = self.role.as_elder_mut()?.clone();
+                let elder = self.as_elder().await?.clone();
                 let handle = tokio::spawn(async move {
-                    Ok(NodeTask::from(
+                    Ok(NodeTask::from(vec![
                         elder
                             .payments
                             .read()
                             .await
                             .inquire(inquiry, msg_id, origin)
                             .await,
-                    ))
+                    ]))
                 });
                 Ok(NodeTask::Thread(handle))
             }
@@ -394,7 +395,7 @@ impl Node {
                 client_sig,
                 origin,
             } => {
-                let elder = self.role.as_elder_mut()?.clone();
+                let elder = self.as_elder().await?.clone();
                 let handle = tokio::spawn(async move {
                     Ok(NodeTask::from(vec![
                         elder

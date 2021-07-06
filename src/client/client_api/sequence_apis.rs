@@ -9,7 +9,7 @@
 use super::Client;
 use crate::client::Error;
 use crate::messaging::client::{
-    Cmd, DataCmd, DataQuery, DebitableOp, Query, QueryResponse, SequenceRead, SequenceWrite,
+    ChargedOps, Cmd, DataCmd, DataQuery, Query, QueryResponse, SequenceRead, SequenceWrite,
 };
 use crate::types::{
     PublicKey, Sequence, SequenceAddress, SequenceEntries, SequenceEntry, SequenceIndex,
@@ -128,7 +128,7 @@ impl Client {
         let payment = self.generate_payment(quote).await?;
 
         // The _actual_ message
-        let cmd = Cmd::Debitable(DebitableOp::Upload {
+        let cmd = Cmd::Debitable(ChargedOps::Upload {
             data: BTreeSet::new(),
             payment,
         });

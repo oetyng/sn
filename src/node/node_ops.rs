@@ -8,8 +8,8 @@
 
 use crate::messaging::{
     client::{
-        ChunkRead, ChunkWrite, ClientMsg, ClientSig, CostInquiry, DataCmd, DataExchange, DataQuery,
-        DebitableOp, ProcessingError, QueryResponse, SupportingInfo,
+        ChargedOps, ChunkRead, ChunkWrite, ClientMsg, ClientSig, CostInquiry, DataCmd,
+        DataExchange, DataQuery, ProcessingError, QueryResponse, SupportingInfo,
     },
     node::NodeMsg,
     Aggregation, DstLocation, EndUser, MessageId, SrcLocation,
@@ -158,7 +158,7 @@ pub enum NodeDuty {
     /// Process Payment for a DataCmd
     ProcessDataPayment {
         id: MessageId,
-        cmd: DebitableOp,
+        cmd: ChargedOps,
         client_sig: ClientSig,
         origin: EndUser,
     },

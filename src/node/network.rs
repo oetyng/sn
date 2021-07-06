@@ -224,12 +224,10 @@ impl Network {
     }
 
     /// get our PKshare
-    #[allow(unused)]
-    pub async fn our_public_key_share(&self) -> Result<PublicKey> {
-        let index = self.our_index().await?;
-        Ok(PublicKey::from(
-            self.our_public_key_set().await?.public_key_share(index),
-        ))
+    pub async fn our_public_key_share(&self) -> Result<(u64, bls::PublicKeyShare)> {
+        let index = self.our_index().await? as u64;
+        let key = self.our_public_key_set().await?.public_key_share(index);
+        Ok((index, key))
     }
 
     /// BLS key index in routing for key shares

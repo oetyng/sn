@@ -6,7 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::payment::DebitableOp;
+use super::payment::ChargedOps;
 use serde::{Deserialize, Serialize};
 use xor_name::XorName;
 
@@ -15,7 +15,7 @@ use xor_name::XorName;
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub enum Cmd {
     /// Commands for manipulating data
-    Debitable(DebitableOp),
+    Debitable(ChargedOps),
 }
 
 impl Cmd {

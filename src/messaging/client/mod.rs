@@ -32,7 +32,7 @@ pub use self::{
     errors::{Error, Result},
     map::{MapCmd, MapRead, MapWrite},
     payment::{
-        CostInquiry, DebitableOp, GuaranteedQuote, GuaranteedQuoteShare, PaymentCmd, PaymentQuote,
+        ChargedOps, CostInquiry, GuaranteedQuote, GuaranteedQuoteShare, PaymentCmd, PaymentQuote,
         PaymentReceipt, PaymentReceiptShare, RegisterPayment,
     },
     query::Query,
@@ -332,7 +332,10 @@ impl From<sn_dbc::Error> for PaymentError {
 /// Events from the network that
 /// are pushed to the client.
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub enum Event {}
+pub enum Event {
+    /// Payment received
+    PaymentReceived(PaymentReceiptShare),
+}
 
 /// Query responses from the network.
 #[allow(clippy::large_enum_variant, clippy::type_complexity)]

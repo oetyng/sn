@@ -31,7 +31,7 @@ use futures::{future::BoxFuture, lock::Mutex, stream::FuturesUnordered, FutureEx
 use handle::NodeTask;
 use rand::rngs::OsRng;
 use role::{AdultRole, Role};
-use sn_dbc::{Hash, KeyManager, NodeSignature, Signature};
+use sn_dbc::{Hash, KeyManager, NodeKey, NodeSignature, Signature};
 use std::sync::Arc;
 use std::{
     fmt::{self, Display, Formatter},
@@ -80,6 +80,11 @@ impl KeyManager for BlsKeyManager {
     async fn sign(&self, msg_hash: &Hash) -> Result<NodeSignature> {
         let (index, sig) = self.network.sign_bytes_as_elder_raw(&(*msg_hash)).await?;
         Ok(NodeSignature::new(index as u64, sig))
+    }
+
+    async fn node_key(&self) -> Result<NodeKey> {
+        let (index, key) = self.network.our_public_key_share().await?;
+        Ok(NodeKey { index, key })
     }
 
     async fn public_key_set(&self) -> Result<bls::PublicKeySet> {

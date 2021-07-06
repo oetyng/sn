@@ -15,20 +15,22 @@ pub use self::reward_wallets::RewardWallets;
 use crate::{
     messaging::{
         client::{
-            ClientMsg, ClientSig, CmdError, CostInquiry, DebitableOp, Error as ErrorMsg,
-            GuaranteedQuote, PaymentError, PaymentQuote, ProcessMsg, QueryResponse,
+            ChargedOps, ClientMsg, ClientSig, CmdError, CostInquiry, Error as ErrorMsg, Event,
+            GuaranteedQuote, PaymentError, PaymentQuote, PaymentReceiptShare, ProcessMsg,
+            QueryResponse, RegisterPayment,
         },
-        Aggregation, EndUser, MessageId, SrcLocation,
+        Aggregation, DstLocation, EndUser, MessageId, SrcLocation,
     },
     node::{
         capacity::OpCost as OpCostCalc,
         node_ops::{MsgType, NodeDuty, OutgoingMsg},
         Error, Result,
     },
-    types::{NodeAge, PublicKey, Token, MAX_CHUNK_SIZE_IN_BYTES},
+    types::{utils::serialise, NodeAge, PublicKey, Token, MAX_CHUNK_SIZE_IN_BYTES},
 };
-use sn_dbc::{KeyManager, Mint, ReissueRequest};
+use sn_dbc::{Hash, KeyManager, Mint, ReissueRequest};
 use std::collections::BTreeMap;
+use tiny_keccak::Hasher;
 use tracing::info;
 use xor_name::{Prefix, XorName};
 
@@ -88,12 +90,11 @@ impl<K: KeyManager> Payments<K> {
     }
 
     /// Get latest Cost for the given operations.
-    #[allow(unused)]
     pub async fn inquire(
-        &mut self,
+        &self,
         inquiry: CostInquiry,
         msg_id: MessageId,
-        origin: SrcLocation,
+        origin: EndUser,
     ) -> NodeDuty {
         let result = self
             .cost(inquiry)
@@ -106,12 +107,11 @@ impl<K: KeyManager> Payments<K> {
                 correlation_id: msg_id,
             })),
             section_source: false, // strictly this is not correct, but we don't expect responses to a response..
-            dst: origin.to_dst(),
+            dst: SrcLocation::EndUser(origin).to_dst(),
             aggregation: Aggregation::None, // TODO: to_be_aggregated: Aggregation::AtDestination,
         })
     }
 
-    #[allow(unused)]
     async fn cost(&self, inquiry: CostInquiry) -> Result<PaymentQuote> {
         let units = match &inquiry {
             CostInquiry::Upload(chunks) => {
@@ -133,6 +133,146 @@ impl<K: KeyManager> Payments<K> {
 
         Ok(PaymentQuote { inquiry, payable })
     }
+
+    /// pay for ops
+    pub async fn pay(
+        &self,
+        payment: RegisterPayment,
+        origin: EndUser,
+        msg_id: MessageId,
+    ) -> Result<NodeDuty> {
+        // TODO: self.validate_payment(&payment) ...
+        let key = self
+            .mint
+            .key_manager()
+            .public_key_set()
+            .await
+            .map_err(|e| Error::Logic(e.to_string()))?
+            .public_key();
+        let sig = self
+            .mint
+            .key_manager()
+            .sign(&Self::hash(&payment)?)
+            .await
+            .map_err(|e| Error::Logic(e.to_string()))?;
+        let receipt = PaymentReceiptShare {
+            paid_ops: payment.inquiry().clone(),
+            sig,
+            key,
+        };
+        // returned for aggregation at client
+        Ok(NodeDuty::Send(OutgoingMsg {
+            msg: MsgType::Client(ClientMsg::Process(ProcessMsg::Event {
+                event: Event::PaymentReceived(receipt),
+                id: MessageId::in_response_to(&msg_id),
+                correlation_id: msg_id,
+            })),
+            section_source: false,
+            dst: DstLocation::EndUser(origin),
+            aggregation: Aggregation::AtDestination,
+        }))
+    }
+
+    pub fn hash(payment: &RegisterPayment) -> Result<Hash> {
+        let mut hasher = tiny_keccak::Sha3::v256();
+        let mut output = [0; 32];
+        let bytes = &serialise(payment).map_err(|e| Error::Logic(e.to_string()))?;
+        hasher.update(bytes);
+        hasher.finalize(&mut output);
+        Ok(Hash::from(output))
+    }
+
+    /// Verifies that the debitable ops has been paid for.
+    pub async fn process_op(
+        &mut self,
+        cmd: ChargedOps,
+        _client_sig: ClientSig,
+        msg_id: MessageId,
+        origin: EndUser,
+    ) -> Result<NodeDuty> {
+        let () = match self.validate_receipt(cmd).await {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(NodeDuty::Send(OutgoingMsg {
+                    msg: MsgType::Client(ClientMsg::Process(ProcessMsg::CmdError {
+                        error: CmdError::Payment(PaymentError(ErrorMsg::InvalidOperation(
+                            e.to_string(),
+                        ))),
+                        id: MessageId::in_response_to(&msg_id),
+                        correlation_id: msg_id,
+                    })),
+                    section_source: false, // strictly this is not correct, but we don't expect responses to a response..
+                    dst: SrcLocation::EndUser(origin).to_dst(),
+                    aggregation: Aggregation::None, // TODO: to_be_aggregated: Aggregation::AtDestination,
+                }));
+            }
+        };
+        // NodeDuty::HandleOp(op)
+        Ok(NodeDuty::NoOp)
+    }
+
+    async fn validate_receipt(&self, _cmd: ChargedOps) -> Result<()> {
+        Ok(())
+    }
+
+    // async fn validate_payment(
+    //     &self,
+    //     payment: RegisterPayment,
+    // ) -> Result<(ReissueRequest, DataCmd, ClientSig)> {
+    //     let (payment, quote, data_cmd, client_sig) = match msg {
+    //         ProcessMsg::Cmd {
+    //             cmd:
+    //                 Cmd::Debitable(NetworkCmd {
+    //                     op: ChargedOps::Data(cmd),
+    //                     quote,
+    //                     payment,
+    //                 }),
+    //             client_sig,
+    //             ..
+    //         } => (payment, quote, cmd, client_sig),
+    //         _ => {
+    //             return Err(Error::InvalidOperation(
+    //                 "Payment is only needed for data writes.".to_string(),
+    //             ))
+    //         }
+    //     };
+
+    //     let total_cost = quote.amount();
+    //     if total_cost > payment.amount() {
+    //         return Err(Error::InvalidOperation(format!(
+    //             "Too low payment: {}, expected: {}",
+    //             payment.amount(),
+    //             total_cost
+    //         )));
+    //     }
+    //     // // verify that each dbc amount is for an existing node,
+    //     // // and that the amount is proportional to the its age.
+    //     // for out in &payment.transaction.outputs {
+    //     //     // TODO: let node_wallet = out.owner_key;
+    //     //     let node_wallet = get_random_pk();
+    //     //     match quote.payable.get(&node_wallet) {
+    //     //         Some(expected_amount) => {
+    //     //             if expected_amount.as_nano() > out.amount {
+    //     //                 return Err(Error::InvalidOperation(format!(
+    //     //                     "Too low payment for {}: {}, expected {}",
+    //     //                     node_wallet,
+    //     //                     expected_amount,
+    //     //                     Token::from_nano(out.amount),
+    //     //                 )));
+    //     //             }
+    //     //         }
+    //     //         None => return Err(Error::InvalidOwner(node_wallet)),
+    //     //     }
+    //     // }
+
+    //     info!(
+    //         "Payment: OK. (Store cost: {}, paid amount: {}.)",
+    //         total_cost,
+    //         payment.amount()
+    //     );
+
+    //     Ok((payment, data_cmd, client_sig))
+    // }
 
     // pub async fn reissue(&self, req: ReissueRequest) -> Result<NodeDuty> {
     //     let inputs_belonging_to_mints = req
@@ -190,127 +330,6 @@ impl<K: KeyManager> Payments<K> {
     //             }))
     //         }
     //     }
-    // }
-
-    /// Verifies that the debitable op, has been paid for.
-    pub async fn process_op(
-        &mut self,
-        cmd: DebitableOp,
-        _client_sig: ClientSig,
-        msg_id: MessageId,
-        origin: EndUser,
-    ) -> Result<NodeDuty> {
-        let () = match self.validate(cmd).await {
-            Ok(result) => result,
-            Err(e) => {
-                return Ok(NodeDuty::Send(OutgoingMsg {
-                    msg: MsgType::Client(ClientMsg::Process(ProcessMsg::CmdError {
-                        error: CmdError::Payment(PaymentError(ErrorMsg::InvalidOperation(
-                            e.to_string(),
-                        ))),
-                        id: MessageId::in_response_to(&msg_id),
-                        correlation_id: msg_id,
-                    })),
-                    section_source: false, // strictly this is not correct, but we don't expect responses to a response..
-                    dst: SrcLocation::EndUser(origin).to_dst(),
-                    aggregation: Aggregation::None, // TODO: to_be_aggregated: Aggregation::AtDestination,
-                }));
-            }
-        };
-        // info!("Payment: forwarding data..");
-        // Ok(NodeDuty::Send(OutgoingMsg {
-        //     msg: MsgType::Node(NodeMsg::NodeCmd {
-        //         cmd: NodeCmd::Metadata {
-        //             cmd: data_cmd.clone(),
-        //             client_sig,
-        //             origin,
-        //         },
-        //         id: MessageId::in_response_to(&msg_id),
-        //     }),
-        //     section_source: true, // i.e. errors go to our section
-        //     dst: DstLocation::Section(data_cmd.dst_address()),
-        //     aggregation: Aggregation::AtDestination,
-        // }))
-        Ok(NodeDuty::NoOp)
-    }
-
-    async fn validate(&self, _cmd: DebitableOp) -> Result<()> {
-        Ok(())
-    }
-
-    // async fn validate_payment(
-    //     &self,
-    //     cmd: DebitableOp,
-    //     _client_sig: ClientSig,
-    // ) -> Result<(DebitableOp, BTreeMap<PublicKey, sn_dbc::Dbc>)> {
-    //     if cmd.payment.amount() > cmd.quote.amount() {
-    //         Ok((cmd.op, cmd.payment))
-    //     } else {
-    //         return Err(Error::InvalidOperation(format!(
-    //             "Too low payment: {}, expected: {}",
-    //             cmd.payment.amount(),
-    //             cmd.quote.amount(),
-    //         )));
-    //     }
-    // }
-
-    // async fn validate_payment(
-    //     &self,
-    //     msg: ProcessMsg,
-    // ) -> Result<(ReissueRequest, DataCmd, ClientSig)> {
-    //     let (payment, quote, data_cmd, client_sig) = match msg {
-    //         ProcessMsg::Cmd {
-    //             cmd:
-    //                 Cmd::Debitable(NetworkCmd {
-    //                     op: DebitableOp::Data(cmd),
-    //                     quote,
-    //                     payment,
-    //                 }),
-    //             client_sig,
-    //             ..
-    //         } => (payment, quote, cmd, client_sig),
-    //         _ => {
-    //             return Err(Error::InvalidOperation(
-    //                 "Payment is only needed for data writes.".to_string(),
-    //             ))
-    //         }
-    //     };
-
-    //     let total_cost = quote.amount();
-    //     if total_cost > payment.amount() {
-    //         return Err(Error::InvalidOperation(format!(
-    //             "Too low payment: {}, expected: {}",
-    //             payment.amount(),
-    //             total_cost
-    //         )));
-    //     }
-    //     // // verify that each dbc amount is for an existing node,
-    //     // // and that the amount is proportional to the its age.
-    //     // for out in &payment.transaction.outputs {
-    //     //     // TODO: let node_wallet = out.owner_key;
-    //     //     let node_wallet = get_random_pk();
-    //     //     match quote.payable.get(&node_wallet) {
-    //     //         Some(expected_amount) => {
-    //     //             if expected_amount.as_nano() > out.amount {
-    //     //                 return Err(Error::InvalidOperation(format!(
-    //     //                     "Too low payment for {}: {}, expected {}",
-    //     //                     node_wallet,
-    //     //                     expected_amount,
-    //     //                     Token::from_nano(out.amount),
-    //     //                 )));
-    //     //             }
-    //     //         }
-    //     //         None => return Err(Error::InvalidOwner(node_wallet)),
-    //     //     }
-    //     // }
-
-    //     info!(
-    //         "Payment: OK. (Store cost: {}, paid amount: {}.)",
-    //         total_cost,
-    //         payment.amount()
-    //     );
-
-    //     Ok((payment, data_cmd, client_sig))
     // }
 }
 

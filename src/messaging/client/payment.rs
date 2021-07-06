@@ -48,6 +48,13 @@ pub struct RegisterPayment {
     pub payment: BTreeMap<PublicKey, sn_dbc::Dbc>,
 }
 
+impl RegisterPayment {
+    ///
+    pub fn inquiry(&self) -> &CostInquiry {
+        &self.quote.quote.inquiry
+    }
+}
+
 /// A given piece of data, which must match the name and bytes specified,
 /// is guaranteed to be accepted, if payment matching this quote
 /// is provided together with the quote.
@@ -87,7 +94,7 @@ pub struct PaymentReceiptShare {
     ///
     pub paid_ops: CostInquiry,
     ///
-    pub sig: SignatureShare,
+    pub sig: sn_dbc::NodeSignature,
     ///
     pub key: bls::PublicKey,
 }
@@ -111,7 +118,7 @@ pub struct PaymentReceipt {
 
 ///
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub enum DebitableOp {
+pub enum ChargedOps {
     ///
     Upload {
         ///
