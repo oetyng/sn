@@ -517,7 +517,7 @@ mod tests {
         match res {
             Err(Error::NoResponse) => Ok(()),
             Err(err) => Err(anyhow!(
-                "Unexpected error returned when deleting a nonexisting Private Register: {}",
+                "Unexpected error returned when deleting a nonexisting Private Register: {:?}",
                 err
             )),
             Ok(_data) => Err(anyhow!(
@@ -550,7 +550,7 @@ mod tests {
                 ..
             }) => {}
             Err(err) => bail!(
-                "Unexpected error returned when attempting to delete a Public Register: {}",
+                "Unexpected error returned when attempting to delete a Public Register: {:?}",
                 err
             ),
             Ok(()) => {}

@@ -22,13 +22,13 @@ use super::Core;
 use crate::messaging::{
     data::ServiceMsg,
     node::{NodeMsg, Proposal},
+    signature_aggregator::Error as AggregatorError,
     AuthorityProof, DstLocation, MessageId, MessageType, MsgKind, NodeMsgAuthority, SectionAuth,
     ServiceAuth, WireMsg,
 };
 use rand::rngs::OsRng;
 
 use crate::routing::{
-    core::AggregatorError,
     error::{Error, Result},
     messages::{NodeMsgAuthorityUtils, WireMsgUtils},
     network::NetworkUtils,

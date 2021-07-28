@@ -15,22 +15,19 @@ mod enduser_registry;
 mod message_filter;
 mod messaging;
 mod msg_handling;
-mod signature_aggregator;
 mod split_barrier;
 
 use crate::dbs::UsedSpace;
 use crate::node::RegisterStorage;
 pub(crate) use bootstrap::{join_network, JoiningAsRelocated};
 pub(crate) use comm::{Comm, ConnectionEvent, SendStatus};
-pub use signature_aggregator::Error as AggregatorError;
-pub(crate) use signature_aggregator::SignatureAggregator;
-use std::path::PathBuf;
 
 use self::{
     enduser_registry::EndUserRegistry, message_filter::MessageFilter, split_barrier::SplitBarrier,
 };
 use crate::messaging::{
     node::{Network, NodeMsg, Proposal, Section, SectionAuth},
+    signature_aggregator::SignatureAggregator,
     MessageId, SectionAuthorityProvider,
 };
 use crate::routing::{
@@ -47,7 +44,7 @@ use crate::routing::{
 use itertools::Itertools;
 use resource_proof::ResourceProof;
 use secured_linked_list::SecuredLinkedList;
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::PathBuf};
 use tokio::sync::mpsc;
 use xor_name::{Prefix, XorName};
 
