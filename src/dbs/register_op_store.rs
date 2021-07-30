@@ -70,7 +70,7 @@ impl RegisterOpStore {
 mod test {
     use super::RegisterOpStore;
     use crate::messaging::data::{RegisterCmd, RegisterWrite};
-    use crate::messaging::ServiceOpSig;
+    use crate::messaging::ServiceAuth;
     use crate::node::Result;
 
     use crate::node::Error;
@@ -117,12 +117,12 @@ mod test {
 
         let write = RegisterWrite::New(replica1);
 
-        let client_sig = ServiceOpSig {
+        let auth = ServiceAuth {
             public_key: pk,
             signature: authority_keypair1.sign(b""),
         };
 
-        let cmd = RegisterCmd { write, client_sig };
+        let cmd = RegisterCmd { write, auth };
 
         store.append(cmd.clone())?;
 
