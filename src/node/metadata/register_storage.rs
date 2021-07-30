@@ -16,7 +16,7 @@ use crate::{
         data::{
             DataCmd, QueryResponse, RegisterCmd, RegisterDataExchange, RegisterRead, RegisterWrite,
         },
-        Authority, DataSigned,
+        Authority, ServiceOpSig,
     },
     types::DataAddress,
 };
@@ -100,14 +100,14 @@ impl RegisterStorage {
         // todo: make outer loop parallel
         for (_, history) in data {
             for op in history {
-                let data_auth =
+                let auth =
                     super::verify_op(op.client_sig.clone(), DataCmd::Register(op.write.clone()))
                         .map_err(|_| {
                             Error::Logic(
                                 "Received register operation signature is invalid".to_string(),
                             )
                         })?;
-                let _ = self.apply(op, data_auth)?;
+                let _ = self.apply(op, auth)?;
             }
         }
 
@@ -119,7 +119,7 @@ impl RegisterStorage {
     pub(crate) async fn write(
         &self,
         write: RegisterWrite,
-        data_auth: Authority<DataSigned>,
+        auth: Authority<ServiceOpSig>,
     ) -> Result<()> {
         let required_space = std::mem::size_of::<RegisterCmd>() as u64;
         if !self.used_space.can_consume(required_space).await {
@@ -127,12 +127,12 @@ impl RegisterStorage {
         }
         let op = RegisterCmd {
             write,
-            client_sig: data_auth.clone().into_inner(),
+            client_sig: auth.clone().into_inner(),
         };
-        self.apply(op, data_auth)
+        self.apply(op, auth)
     }
 
-    fn apply(&self, op: RegisterCmd, data_auth: Authority<DataSigned>) -> Result<()> {
+    fn apply(&self, op: RegisterCmd, auth: Authority<ServiceOpSig>) -> Result<()> {
         let RegisterCmd { write, .. } = op.clone();
 
         let address = *write.address();
@@ -170,8 +170,8 @@ impl RegisterStorage {
                             }
                             // TODO - Register::check_permission() doesn't support Delete yet in safe-nd
                             // register.check_permission(action, Some(client_sig.public_key))?;
-                            if data_auth.public_key != entry.state.owner() {
-                                Err(Error::InvalidOwner(data_auth.public_key))
+                            if auth.public_key != entry.state.owner() {
+                                Err(Error::InvalidOwner(auth.public_key))
                             } else {
                                 info!("Deleting Register");
                                 let _ = self.db.drop_tree(key)?;
@@ -213,7 +213,7 @@ impl RegisterStorage {
                 info!("Editing Register");
                 entry
                     .state
-                    .check_permissions(Action::Write, Some(data_auth.public_key))?;
+                    .check_permissions(Action::Write, Some(auth.public_key))?;
                 let result = entry.state.apply_op(reg_op).map_err(Error::NetworkData);
 
                 if result.is_ok() {

@@ -70,7 +70,7 @@ impl RegisterOpStore {
 mod test {
     use super::RegisterOpStore;
     use crate::messaging::data::{RegisterCmd, RegisterWrite};
-    use crate::messaging::DataSigned;
+    use crate::messaging::ServiceOpSig;
     use crate::node::Result;
 
     use crate::node::Error;
@@ -117,7 +117,7 @@ mod test {
 
         let write = RegisterWrite::New(replica1);
 
-        let client_sig = DataSigned {
+        let client_sig = ServiceOpSig {
             public_key: pk,
             signature: authority_keypair1.sign(b""),
         };
