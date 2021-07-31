@@ -8,17 +8,16 @@
 
 use super::role::{ElderRole, Role};
 use crate::messaging::data::DataExchange;
+use crate::node::payments::elder_signing::ElderSigning;
 use crate::node::{
     capacity::OpCost,
     capacity::{AdultsStorageInfo, Capacity, CapacityReader, CapacityWriter},
     metadata::{adult_reader::AdultReader, Metadata},
-    node_api::BlsKeyManager,
     node_ops::NodeDuty,
     payments::Payments,
     Node, Result,
 };
 use crate::types::{NodeAge, PublicKey};
-use sn_dbc::Mint;
 use std::collections::BTreeMap;
 use tracing::info;
 use xor_name::XorName;
@@ -43,9 +42,10 @@ impl Node {
             XorName,
             (NodeAge, PublicKey),
         >::new());
-        let key_mgr = BlsKeyManager::new(self.network_api.clone());
-        let mint = Mint::new(key_mgr);
-        let payments = Payments::new(store_cost, reward_wallets, mint);
+        // let key_mgr = BlsKeyManager::new(self.network_api.clone());
+        // let mint = Mint::new(key_mgr);
+        let signing = ElderSigning::new(self.network_api.clone()).await?;
+        let payments = Payments::new(store_cost, reward_wallets, signing);
 
         *self.role.write().await = Role::Elder(ElderRole::new(meta_data, payments, false));
 

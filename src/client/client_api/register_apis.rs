@@ -8,9 +8,10 @@
 
 use super::Client;
 use crate::client::Error;
-use crate::messaging::data::{
-    ChargedOps, DataCmd, DataQuery, QueryResponse, RegisterRead, RegisterWrite,
-};
+use crate::messaging::cmd::BatchedWrites;
+use crate::messaging::data::{DataCmd, DataQuery, QueryResponse, RegisterRead, RegisterWrite};
+use crate::messaging::payment::CostInquiry;
+use crate::messaging::query::Query;
 use crate::types::{
     register::{
         Address, Entry, EntryHash, Permissions, Policy, PrivatePermissions, PrivatePolicy,
@@ -85,15 +86,21 @@ impl Client {
         let _cmd = DataCmd::Register(RegisterWrite::Delete(address));
 
         // Get quote for write
-        let quote = self.get_quote().await?;
+        let quote = self
+            .get_quote(CostInquiry {
+                chunks: BTreeSet::new(),
+                reg_ops: BTreeSet::new(),
+            })
+            .await?;
         // Generate payment matching the quote
         let payment = self.generate_payment(quote).await?;
 
         // The _actual_ message
-        let cmd = DataCmd::ChargedOp(ChargedOps::Upload {
-            data: BTreeSet::new(),
+        let cmd = BatchedWrites {
+            uploads: vec![],
+            edits: vec![],
             payment,
-        });
+        };
 
         self.send_cmd(cmd).await
     }
@@ -121,7 +128,7 @@ impl Client {
         // Finally we can send the mutation to the network's replicas
         let cmd = DataCmd::Register(RegisterWrite::Edit(op));
 
-        self.pay_and_send_data_command(cmd).await?;
+        self.pay_and_send_data_command(vec![cmd]).await?;
 
         Ok(hash)
     }
@@ -135,7 +142,7 @@ impl Client {
         debug!("Attempting to pay and write a Register to the network");
         let cmd = DataCmd::Register(RegisterWrite::New(data));
 
-        self.pay_and_send_data_command(cmd).await
+        self.pay_and_send_data_command(vec![cmd]).await
     }
 
     //----------------------
@@ -147,7 +154,7 @@ impl Client {
         trace!("Get Register data at {:?}", address.name());
         // Let's fetch the Register from the network
         let query = DataQuery::Register(RegisterRead::Get(address));
-        let query_result = self.send_query(query).await?;
+        let query_result = self.send_query(Query::Data(query)).await?;
         let msg_id = query_result.msg_id;
         match query_result.response {
             QueryResponse::GetRegister(res) => res.map_err(|err| Error::from((err, msg_id))),

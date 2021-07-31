@@ -9,7 +9,7 @@
 use super::Client;
 use crate::client::Error;
 use crate::messaging::data::{
-    ChargedOps, DataCmd, DataQuery, PointerEdit, QueryResponse, SequenceRead, SequenceWrite,
+    BatchedWrites, DataCmd, DataQuery, PointerEdit, QueryResponse, SequenceRead, SequenceWrite,
 };
 use crate::types::{
     PublicKey, Sequence, SequenceAddress, SequenceEntries, SequenceEntry, SequenceIndex,
@@ -124,7 +124,7 @@ impl Client {
         let payment = self.generate_payment(quote).await?;
 
         // The _actual_ message
-        let cmd = ChargedOps {
+        let cmd = BatchedWrites {
             uploads: Vec::new(),
             edits: vec![PointerEdit::Sequence(SequenceWrite::Delete(address))],
             payment,

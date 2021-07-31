@@ -24,14 +24,35 @@ pub enum Cmd {
     ///
     /// [`Data`]: crate::types
     Data(DataCmd),
-    /// [`Data`] write operation (with Dbcs).
+    /// [`BatchedWrites`] operation (with Dbcs).
     ///
-    /// [`Data`]: crate::types
-    DataDbc(ChargedOps),
+    /// [`BatchedWrites`]: crate::messaging::cmd
+    BatchData(BatchedWrites),
     /// [`Payment`] registration.
     ///
     /// [`Payment`]: crate::messaging::payment::RegisterPayment
     Payment(RegisterPayment),
+}
+
+impl Cmd {
+    /// Creates a Response containing an error, with the Response variant corresponding to the
+    /// command variant.
+    pub fn error(&self, error: Error) -> CmdError {
+        match self {
+            Self::Data(c) => c.error(error),
+            Self::BatchData(c) => unimplemented!(),
+            Self::Payment(c) => c.error(error),
+        }
+    }
+
+    /// Returns the address of the destination for command.
+    pub fn dst_address(&self) -> XorName {
+        match self {
+            Self::Data(c) => c.dst_address(),
+            Self::BatchData(c) => unimplemented!(),
+            Self::Payment(c) => c.dst_address(),
+        }
+    }
 }
 
 /// Data commands - creating, updating, or removing data.
@@ -44,38 +65,24 @@ pub enum Cmd {
 ///
 /// [`types`]: crate::types
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub struct ChargedOps {
+pub struct BatchedWrites {
     /// [`Chunk`] write operation.
     ///
     /// [`Chunk`]: crate::types::Chunk
-    uploads: Vec<ChunkWrite>,
+    pub uploads: Vec<ChunkWrite>,
     /// [`Register`] write operation.
     ///
     /// [`Register`]: crate::types::register::Register
-    edits: Vec<RegisterWrite>,
+    pub edits: Vec<RegisterWrite>,
     /// [`Payment`] receipt.
     ///
     /// [`Payment`]: crate::messaging::payment::PaymentReceipt
-    payment: PaymentReceipt,
+    pub payment: PaymentReceipt,
 }
 
-impl Cmd {
-    /// Creates a Response containing an error, with the Response variant corresponding to the
-    /// command variant.
-    pub fn error(&self, error: Error) -> CmdError {
-        match self {
-            Self::Data(c) => c.error(error),
-            Self::DataDbc(c) => c.error(error),
-            Self::Payment(c) => c.error(error),
-        }
-    }
-
+impl BatchedWrites {
     /// Returns the address of the destination for command.
     pub fn dst_address(&self) -> XorName {
-        match self {
-            Self::Data(c) => c.dst_address(),
-            Self::DataDbc(c) => c.dst_address(),
-            Self::Payment(c) => c.dst_address(),
-        }
+        unimplemented!()
     }
 }

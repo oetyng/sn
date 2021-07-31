@@ -110,11 +110,11 @@ impl Network {
         Ok(pk_set)
     }
 
-    pub async fn our_index(&self) -> Result<usize> {
+    pub(crate) async fn our_index(&self) -> Result<usize> {
         self.routing.our_index().await.map_err(Error::Routing)
     }
 
-    pub async fn get_section_pk_by_name(&self, name: &XorName) -> Result<PublicKey> {
+    pub(crate) async fn get_section_pk_by_name(&self, name: &XorName) -> Result<PublicKey> {
         self.routing
             .matching_section(name)
             .await

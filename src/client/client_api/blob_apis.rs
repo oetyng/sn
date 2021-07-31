@@ -12,7 +12,7 @@ use super::{
 };
 use crate::messaging::data::{ChunkRead, ChunkWrite, DataCmd, DataQuery, QueryResponse};
 use crate::types::{Chunk, ChunkAddress, PrivateChunk, PublicChunk, PublicKey};
-use crate::client::Error;
+use crate::{client::Error, messaging::query::Query};
 use bincode::{deserialize, serialize};
 use self_encryption::{DataMap, SelfEncryptor};
 use serde::{Deserialize, Serialize};
@@ -121,7 +121,7 @@ impl Client {
         }
 
         let res = self
-            .send_query(DataQuery::Blob(ChunkRead::Get(head_address)))
+            .send_query(Query::Data(DataQuery::Blob(ChunkRead::Get(head_address))))
             .await?;
 
         let msg_id = res.msg_id;

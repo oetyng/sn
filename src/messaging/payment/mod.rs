@@ -48,6 +48,17 @@ impl RegisterPayment {
     pub fn inquiry(&self) -> &CostInquiry {
         &self.quote.quote.inquiry
     }
+
+    /// Creates a Response containing an error, with the Response
+    /// variant corresponding to the cmd variant.
+    pub fn error(&self, error: Error) -> CmdError {
+        CmdError::Payment(error)
+    }
+
+    /// Returns the address of the destination.
+    pub fn dst_address(&self) -> XorName {
+        self.inquiry().dst_address()
+    }
 }
 
 /// A given piece of data, which must match the name and bytes specified,
@@ -80,7 +91,7 @@ pub struct GuaranteedQuote {
     ///
     pub sig: bls::Signature,
     ///
-    pub key_set: bls::PublicKeySet,
+    pub key: bls::PublicKey,
 }
 
 ///
@@ -89,9 +100,9 @@ pub struct PaymentReceiptShare {
     ///
     pub paid_ops: CostInquiry,
     ///
-    pub sig: sn_dbc::NodeSignature,
+    pub sig: SignatureShare,
     ///
-    pub key: bls::PublicKey,
+    pub key_set: bls::PublicKeySet,
 }
 
 ///
@@ -108,38 +119,46 @@ pub struct PaymentReceipt {
 ///
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct PointerEditHash(pub XorName);
+///
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
+pub struct ChunkHash(pub XorName);
 
 /// Cost inquiry for a batch of ops
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct CostInquiry {
     /// Batch of chunks to be uploaded
-    pub uploads: BTreeSet<XorName>,
-    /// Batch of edits to be edited
-    pub edits: BTreeSet<PointerEditHash>,
+    pub chunks: BTreeSet<ChunkHash>,
+    /// Batch of reg ops
+    pub reg_ops: BTreeSet<PointerEditHash>,
 }
 
 impl CostInquiry {
-    pub fn payment_xorname(&self) -> Result<XorName, CmdError> {
-        if self.uploads.is_empty() && self.edits.is_empty() {
-            return Err(CmdError::Data(Error::InvalidOperation(
-                "Empty inquiry".to_string(),
-            )));
-        }
-        // TODO: XOR all the XorNames of uploads and edits
-        Ok(XorName::random())
+    ///
+    pub fn new(chunks: BTreeSet<ChunkHash>, reg_ops: BTreeSet<PointerEditHash>) -> Self {
+        Self { chunks, reg_ops }
     }
-
     /// Creates a QueryResponse containing an error, with the QueryResponse variant corresponding to the
     /// Request variant.
-    #[allow(unused)]
     pub fn error(&self, error: Error) -> QueryResponse {
         QueryResponse::GetQuote(Err(error))
     }
 
     /// Returns the address of the destination for the query.
-    #[allow(unused)]
-    pub fn dst_address(&self) -> Result<XorName, CmdError> {
-        self.payment_xorname()
+    pub fn dst_address(&self) -> XorName {
+        self.chunks
+            .iter()
+            .map(|c| c.0)
+            .chain(self.reg_ops.iter().map(|e| e.0))
+            .reduce(Self::xor)
+            .unwrap_or_default()
+    }
+
+    fn xor(a: XorName, b: XorName) -> XorName {
+        let mut init = a.0;
+        for (i, byte) in b.0.iter().enumerate() {
+            init[i] ^= *byte;
+        }
+        XorName(init)
     }
 }
 
@@ -158,7 +177,7 @@ impl PaymentCmd {
     pub fn dst_address(&self) -> XorName {
         use PaymentCmd::*;
         match self {
-            RegisterPayment(ref _reg) => XorName::random(), //XorName::from(reg.quote.signers.public_key()), // this is handled where the debit is made
+            RegisterPayment(ref reg) => reg.dst_address(),
         }
     }
 }
@@ -184,3 +203,35 @@ impl fmt::Debug for PaymentCmd {
 //         }
 //     }
 // }
+
+#[cfg(test)]
+mod test {
+    use xor_name::XorName;
+
+    #[test]
+    fn blah() {
+        let rand_1 = XorName::random();
+        let rand_2 = XorName::random();
+
+        assert!(rand_1 != rand_2);
+
+        let prod_1 = xor(rand_1, rand_2);
+        let prod_2 = xor(rand_2, rand_1);
+
+        assert_eq!(prod_1, prod_2);
+
+        let der_1 = xor(rand_2, prod_1);
+        let der_2 = xor(rand_1, prod_1);
+
+        assert_eq!(der_1, rand_1);
+        assert_eq!(der_2, rand_2);
+    }
+
+    fn xor(a: XorName, b: XorName) -> XorName {
+        let mut init = a.0;
+        for (i, byte) in b.0.iter().enumerate() {
+            init[i] ^= *byte;
+        }
+        XorName(init)
+    }
+}

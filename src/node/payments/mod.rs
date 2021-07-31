@@ -6,15 +6,15 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-//pub mod elder_signing;
+pub(crate) mod elder_signing;
 mod reward_calc;
 mod reward_wallets;
 
-use self::reward_calc::distribute_rewards;
-pub use self::reward_wallets::RewardWallets;
+pub(crate) use self::reward_wallets::RewardWallets;
+use self::{elder_signing::ElderSigning, reward_calc::calculate_distribution};
 use crate::{
     messaging::{
-        cmd::ChargedOps,
+        cmd::BatchedWrites,
         data::{CmdError, Error as ErrorMsg, Event, QueryResponse, ServiceMsg},
         payment::{
             CostInquiry, GuaranteedQuote, GuaranteedQuoteShare, PaymentQuote, PaymentReceiptShare,
@@ -29,7 +29,8 @@ use crate::{
     },
     types::{utils::serialise, NodeAge, PublicKey, Token, MAX_CHUNK_SIZE_IN_BYTES},
 };
-use sn_dbc::{Hash, KeyManager, Mint, ReissueRequest};
+use dashmap::{DashMap, DashSet};
+use sn_dbc::{Hash, ReissueRequest};
 use std::collections::BTreeMap;
 use tiny_keccak::Hasher;
 use tracing::info;
@@ -41,57 +42,59 @@ type Payment = BTreeMap<PublicKey, sn_dbc::Dbc>;
 /// via the usage of a distributed AT2 Actor.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
-pub struct Payments<K: KeyManager> {
+pub(crate) struct Payments {
     cost: OpCostCalc,
     wallets: RewardWallets,
-    mint: Mint<K>,
+    signing: ElderSigning,
+    payments: DashMap<PublicKey, DashSet<sn_dbc::Dbc>>,
 }
 
-impl<K: KeyManager> Payments<K> {
+impl Payments {
     ///
-    pub fn new(cost: OpCostCalc, wallets: RewardWallets, mint: Mint<K>) -> Self {
+    pub(crate) fn new(cost: OpCostCalc, wallets: RewardWallets, signing: ElderSigning) -> Self {
         Self {
             cost,
             wallets,
-            mint,
+            signing,
+            payments: DashMap::new(),
         }
     }
 
     /// Returns registered wallet key of a node.
     #[allow(unused)]
-    pub fn get_node_wallet(&self, node_name: &XorName) -> Option<PublicKey> {
+    pub(crate) fn get_node_wallet(&self, node_name: &XorName) -> Option<PublicKey> {
         let (_, key) = self.wallets.get(node_name)?;
         Some(key)
     }
 
     /// Returns node wallet keys of registered nodes.
     #[allow(unused)]
-    pub fn node_wallets(&self) -> BTreeMap<XorName, (NodeAge, PublicKey)> {
+    pub(crate) fn node_wallets(&self) -> BTreeMap<XorName, (NodeAge, PublicKey)> {
         self.wallets.node_wallets()
     }
 
     /// Nodes register/updates wallets for future reward payouts.
     #[allow(unused)]
-    pub fn set_node_wallet(&self, node_id: XorName, wallet: PublicKey, age: u8) {
+    pub(crate) fn set_node_wallet(&self, node_id: XorName, wallet: PublicKey, age: u8) {
         self.wallets.set_node_wallet(node_id, age, wallet)
     }
 
     /// When the section becomes aware that a node has left,
     /// its reward key is removed.
     #[allow(unused)]
-    pub fn remove_node_wallet(&self, node_name: XorName) {
+    pub(crate) fn remove_node_wallet(&self, node_name: XorName) {
         self.wallets.remove_wallet(node_name)
     }
 
     /// When the section becomes aware that a node has left,
     /// its reward key is removed.
     #[allow(unused)]
-    pub fn keep_wallets_of(&self, prefix: Prefix) {
+    pub(crate) fn keep_wallets_of(&self, prefix: Prefix) {
         self.wallets.keep_wallets_of(prefix)
     }
 
     /// Get current cost for the given operations.
-    pub async fn inquire(
+    pub(crate) async fn inquire(
         &self,
         inquiry: CostInquiry,
         msg_id: MessageId,
@@ -113,53 +116,57 @@ impl<K: KeyManager> Payments<K> {
     }
 
     async fn cost(&self, inquiry: CostInquiry) -> Result<GuaranteedQuoteShare> {
-        if inquiry.uploads.is_empty() && inquiry.edits.is_empty() {
+        if inquiry.chunks.is_empty() && inquiry.reg_ops.is_empty() {
             return Err(Error::InvalidOperation("No data provided".to_string()));
         }
 
-        let units = (inquiry.uploads.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES)
-            + (inquiry.edits.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES / 10);
+        let units = (inquiry.chunks.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES)
+            + (inquiry.reg_ops.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES / 10);
 
         let cost = self.cost.from(units).await?;
         info!("Cost for {:?} units: {}", units, cost);
-        let payable: BTreeMap<_, _> = distribute_rewards(cost, self.node_wallets())
+        let payable: BTreeMap<_, _> = calculate_distribution(cost, self.node_wallets())
             .iter()
             .map(|(_, (_, key, amount))| (*key, *amount))
             .collect();
 
+        let quote = PaymentQuote { inquiry, payable };
+        let sig = self.signing.sign(&quote).await?;
+        let key_set = self.signing.public_key_set().await?;
+
         Ok(GuaranteedQuoteShare {
-            quote: PaymentQuote { inquiry, payable },
-            sig: unimplemented!(),
-            key_set: unimplemented!(),
+            quote,
+            sig,
+            key_set,
         })
     }
 
     /// pay for ops
-    pub async fn pay(
+    pub(crate) async fn pay(
         &self,
         payment: RegisterPayment,
         origin: EndUser,
         msg_id: MessageId,
     ) -> Result<NodeDuty> {
         // TODO: self.validate_payment(&payment) ...
-        let key = self
-            .mint
-            .key_manager()
-            .public_key_set()
-            .await
-            .map_err(|e| Error::Logic(e.to_string()))?
-            .public_key();
-        let sig = self
-            .mint
-            .key_manager()
-            .sign(&Self::hash(&payment)?)
-            .await
-            .map_err(|e| Error::Logic(e.to_string()))?;
+
+        let key_set = self.signing.public_key_set().await?;
+        let sig = self.signing.sign(&payment).await?;
         let receipt = PaymentReceiptShare {
             paid_ops: payment.inquiry().clone(),
             sig,
-            key,
+            key_set,
         };
+
+        // store payments, for release when node relocates
+        // or throw away if node misbehaves
+        for (key, dbc) in payment.payment {
+            if !self.payments.contains_key(&key) {
+                let _ = self.payments.insert(key, DashSet::new());
+            }
+            let _ = self.payments.get(&key).map(|pair| pair.value().insert(dbc));
+        }
+
         // returned for aggregation at client
         Ok(NodeDuty::Send(OutgoingMsg {
             id: MessageId::in_response_to(&msg_id),
@@ -172,7 +179,7 @@ impl<K: KeyManager> Payments<K> {
         }))
     }
 
-    pub fn hash(payment: &RegisterPayment) -> Result<Hash> {
+    pub(crate) fn hash(payment: &RegisterPayment) -> Result<Hash> {
         let mut hasher = tiny_keccak::Sha3::v256();
         let mut output = [0; 32];
         let bytes = &serialise(payment).map_err(|e| Error::Logic(e.to_string()))?;
@@ -181,10 +188,10 @@ impl<K: KeyManager> Payments<K> {
         Ok(Hash::from(output))
     }
 
-    /// Verifies that the debitable ops has been paid for.
-    pub async fn verify_ops_paid(
+    /// Verifies that the debitable ops have been paid for.
+    pub(crate) async fn verify_ops_paid(
         &self,
-        ops: ChargedOps,
+        ops: BatchedWrites,
         msg_id: MessageId,
         origin: EndUser,
     ) -> Result<NodeDuty> {
@@ -204,7 +211,7 @@ impl<K: KeyManager> Payments<K> {
         }
     }
 
-    async fn validate_receipt(&self, _ops: ChargedOps) -> Result<()> {
+    async fn validate_receipt(&self, _ops: BatchedWrites) -> Result<()> {
         Ok(())
     }
 
@@ -216,7 +223,7 @@ impl<K: KeyManager> Payments<K> {
     //         ProcessMsg::Cmd {
     //             cmd:
     //                 Cmd::Debitable(NetworkCmd {
-    //                     op: ChargedOps::Data(cmd),
+    //                     op: BatchedWrites::Data(cmd),
     //                     quote,
     //                     payment,
     //                 }),
@@ -267,7 +274,7 @@ impl<K: KeyManager> Payments<K> {
     //     Ok((payment, data_cmd, client_sig))
     // }
 
-    // pub async fn reissue(&self, req: ReissueRequest) -> Result<NodeDuty> {
+    // pub(crate) async fn reissue(&self, req: ReissueRequest) -> Result<NodeDuty> {
     //     let inputs_belonging_to_mints = req
     //         .transaction
     //         .inputs

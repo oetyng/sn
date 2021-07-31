@@ -8,11 +8,12 @@
 
 use super::{QueryResult, Session};
 use crate::client::Error;
+use crate::messaging::cmd::BatchedWrites;
+use crate::messaging::query::Query;
 use crate::messaging::{
-    data::{ChunkRead, DataCmd, DataQuery, QueryResponse},
+    data::{ChunkRead, DataQuery, QueryResponse},
     section_info::SectionInfoMsg,
-    DstLocation, MsgKind,
-    MessageId, ServiceAuth, WireMsg,
+    DstLocation, MessageId, MsgKind, ServiceAuth, WireMsg,
 };
 use crate::types::{Chunk, PrivateChunk, PublicChunk};
 use bls::SecretKey;
@@ -112,15 +113,15 @@ impl Session {
     /// Send a `ServiceMsg` to the network without awaiting for a response.
     pub(crate) async fn send_cmd(
         &self,
-        ops: ChargedOps,
+        ops: BatchedWrites,
         auth: ServiceAuth,
         payload: Bytes,
     ) -> Result<(), Error> {
         let endpoint = self.endpoint()?.clone();
         let section_pk = self.section_key().await?;
-        let data_name = cmd.dst_address();
+        let dst = ops.dst_address();
 
-        self.get_section_for(data_name).await?;
+        self.get_section_for(dst).await?;
 
         // Wait for 2 seconds to receive SAP
         let _ = sleep(Duration::from_secs(2));
@@ -136,7 +137,7 @@ impl Session {
         // Get DataSection elders details. Resort to own section if DataSection is not available.
         let (elders, section_pk) = self
             .network
-            .get_matching(&data_name)
+            .get_matching(&dst)
             .map(|sap| {
                 (
                     sap.elders.values().cloned().collect::<Vec<SocketAddr>>(),
@@ -161,7 +162,7 @@ impl Session {
         );
 
         let dst_location = DstLocation::Section {
-            name: data_name,
+            name: dst,
             section_pk,
         };
         let msg_kind = MsgKind::ServiceMsg(auth);
@@ -204,208 +205,25 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) async fn send_inquiry(
-        &self,
-        serialised_inquiry: Bytes,
-        payment_xorname: XorName,
-        data_auth: DataSigned,
-    ) -> Result<GuaranteedQuote, Error> {
-        let (elders, pk_set, prefix) = self
-            .all_known_sections
-            .read()
-            .await
-            .clone()
-            .into_iter()
-            .sorted_by(|(lhs_name, _), (rhs_name, _)| {
-                payment_xorname.cmp_distance(&lhs_name.name(), &rhs_name.name())
-            })
-            .take(1)
-            .map(|(_, sap)| {
-                (
-                    sap.elders.values().map(|c| *c).collect_vec(),
-                    sap.public_key_set,
-                    sap.prefix,
-                )
-            })
-            .exactly_one()
-            .map_err(|e| Error::InsufficientElderConnections(0))?;
-
-        let endpoint = self.endpoint()?;
-
-        let wire_msg = WireMsg::new_msg(
-            MessageId::new(),
-            serialised_inquiry,
-            MsgKind::ServiceMsg(data_auth),
-            DstLocation::Section {
-                name: prefix.name(),
-                section_pk: pk_set.public_key(),
-            },
-        )?;
-
-        let serialized_wire_msg = wire_msg.serialize()?;
-
-        for socket in elders {
-            let endpoint = endpoint.clone();
-            let msg_bytes = serialized_wire_msg.clone();
-            let counter_clone = responses_discarded.clone();
-            let task_handle = tokio::spawn(async move {
-                endpoint.connect_to(&socket).await?;
-
-                // Retry queries that failed due to connection issues only
-                let mut result = Err(Error::ElderQuery);
-                for attempt in 0..NUMBER_OF_RETRIES + 1 {
-                    let msg_bytes_clone = msg_bytes.clone();
-
-                    if let Err(err) = endpoint.send_message(msg_bytes_clone, &socket).await {
-                        error!(
-                            "Try #{:?} @ {:?}, failed sending query message: {:?}",
-                            attempt + 1,
-                            socket,
-                            err
-                        );
-                        result = Err(Error::SendingQuery);
-                        if attempt <= NUMBER_OF_RETRIES {
-                            let millis = 2_u64.pow(attempt as u32 - 1) * 100;
-                            tokio::time::sleep(std::time::Duration::from_millis(millis)).await
-                        }
-                    } else {
-                        trace!("DataMsg with id: {:?}, sent to {}", &msg_id, &socket);
-                        result = Ok(());
-                        break;
-                    }
-                }
-
-                match &result {
-                    Err(err) => {
-                        error!("Error sending Query to elder: {:?} ", err);
-                        let mut a = counter_clone.lock().await;
-                        *a += 1;
-                    }
-                    Ok(()) => (),
-                }
-
-                result
-            });
-
-            tasks.push(task_handle);
-        }
-
-        // TODO:
-        // We are now simply accepting the very first valid response we receive,
-        // but we may want to revisit this to compare multiple responses and validate them,
-        // similar to what we used to do up to the following commit:
-        // https://github.com/maidsafe/sn_client/blob/9091a4f1f20565f25d3a8b00571cc80751918928/src/connection_manager.rs#L328
-        //
-        // For Chunk responses we already validate its hash matches the xorname requested from,
-        // so we don't need more than one valid response to prevent from accepting invaid responses
-        // from byzantine nodes, however for mutable data (non-Chunk esponses) we will
-        // have to review the approach.
-        let mut responses_discarded: usize = 0;
-
-        // Send all queries concurrently
-        let results = join_all(tasks).await;
-
-        for result in results {
-            if let Err(err) = result {
-                error!("Error spawning task to send query: {:?} ", err);
-                responses_discarded += 1;
-            }
-        }
-
-        let response = loop {
-            let mut error_response = None;
-            match (receiver.recv().await, chunk_addr) {
-                (Some(QueryResponse::GetChunk(Ok(blob))), Some(chunk_addr)) => {
-                    // We are dealing with Chunk query responses, thus we validate its hash
-                    // matches its xorname, if so, we don't need to await for more responses
-                    debug!("Chunk QueryResponse received is: {:#?}", blob);
-
-                    let xorname = match &blob {
-                        Chunk::Private(priv_chunk) => {
-                            *PrivateChunk::new(priv_chunk.value().clone(), *priv_chunk.owner())
-                                .name()
-                        }
-                        Chunk::Public(pub_chunk) => {
-                            *PublicChunk::new(pub_chunk.value().clone()).name()
-                        }
-                    };
-
-                    if *chunk_addr.name() == xorname {
-                        trace!("Valid Chunk received for {}", msg_id);
-                        break Some(QueryResponse::GetChunk(Ok(blob)));
-                    } else {
-                        // the Chunk content doesn't match its Xorname,
-                        // this is suspicious and it could be a byzantine node
-                        warn!("We received an invalid Chunk response from one of the nodes");
-                        responses_discarded += 1;
-                    }
-                }
-                // Erring on the side of positivity. \
-                // Saving error, but not returning until we have more responses in
-                // (note, this will overwrite prior errors, so we'll just return whicever was last received)
-                (response @ Some(QueryResponse::GetChunk(Err(_))), Some(_))
-                | (response @ Some(QueryResponse::GetRegister(Err(_))), None)
-                | (response @ Some(QueryResponse::GetSequence(Err(_))), None)
-                | (response @ Some(QueryResponse::GetRegisterPolicy(Err(_))), None)
-                | (response @ Some(QueryResponse::GetRegisterOwner(Err(_))), None)
-                | (response @ Some(QueryResponse::GetRegisterUserPermissions(Err(_))), None)
-                | (response @ Some(QueryResponse::GetSequenceLastEntry(Err(_))), None)
-                | (response @ Some(QueryResponse::GetSequencePrivatePolicy(Err(_))), None)
-                | (response @ Some(QueryResponse::GetSequencePublicPolicy(Err(_))), None)
-                | (response @ Some(QueryResponse::GetSequenceRange(Err(_))), None) => {
-                    debug!("QueryResponse error received (but may be overridden by a non-error reponse from another elder): {:#?}", &response);
-                    error_response = response;
-                    responses_discarded += 1;
-                }
-                (Some(response), _) => {
-                    debug!("QueryResponse received is: {:#?}", response);
-                    break Some(response);
-                }
-                (None, _) => {
-                    debug!("QueryResponse channel closed.");
-                    break None;
-                }
-            }
-            if responses_discarded == elders_len {
-                break error_response;
-            }
-        };
-
-        debug!(
-            "Response obtained for query w/id {:?}: {:?}",
-            msg_id, response
-        );
-
-        let _ = tokio::spawn(async move {
-            // Remove the response sender
-            trace!("Removing channel for {:?}", msg_id);
-            let _ = pending_queries.clone().write().await.remove(&msg_id);
-        });
-
-        response
-            .map(|response| QueryResult { response, msg_id })
-            .ok_or(Error::NoResponse)
-    }
-
     /// Send a `ServiceMsg` to the network awaiting for the response.
     pub(crate) async fn send_query(
         &self,
-        query: DataQuery,
+        query: Query,
         auth: ServiceAuth,
         payload: Bytes,
     ) -> Result<QueryResult, Error> {
         let endpoint = self.endpoint()?.clone();
         let pending_queries = self.pending_queries.clone();
 
-        let chunk_addr = if let DataQuery::Blob(ChunkRead::Get(address)) = query {
+        let chunk_addr = if let Query::Data(DataQuery::Blob(ChunkRead::Get(address))) = query {
             Some(address)
         } else {
             None
         };
 
-        let data_name = query.dst_address();
+        let dst = query.dst_address();
 
-        self.get_section_for(data_name).await?;
+        self.get_section_for(dst).await?;
 
         // Wait for 2 seconds to receive SAP
         let _ = sleep(Duration::from_secs(2));
@@ -414,7 +232,7 @@ impl Session {
         let our_section_pk = self.section_key().await?;
 
         // Get DataSection elders details. Resort to own section if DataSection is not available.
-        let (elders, section_pk) = self.network.get_matching(&data_name).map_or_else(
+        let (elders, section_pk) = self.network.get_matching(&dst).map_or_else(
             || (our_section, our_section_pk),
             |sap| (sap.elders.clone(), sap.public_key_set.public_key()),
         );
@@ -422,7 +240,7 @@ impl Session {
         // We select the NUM_OF_ELDERS_SUBSET_FOR_QUERIES closest Elders we are querying
         let chosen_elders = elders
             .into_iter()
-            .sorted_by(|(lhs_name, _), (rhs_name, _)| data_name.cmp_distance(lhs_name, rhs_name))
+            .sorted_by(|(lhs_name, _), (rhs_name, _)| dst.cmp_distance(lhs_name, rhs_name))
             .take(NUM_OF_ELDERS_SUBSET_FOR_QUERIES)
             .map(|(_, addr)| addr)
             .collect::<Vec<SocketAddr>>();
@@ -433,7 +251,7 @@ impl Session {
             payload,
             MsgKind::ServiceMsg(auth),
             DstLocation::Section {
-                name: data_name,
+                name: dst,
                 section_pk,
             },
         )?;

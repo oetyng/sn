@@ -190,12 +190,14 @@ impl Node {
                 Ok(NodeTask::None)
             }
             //
+            // ---------- Payments --------------
+            NodeDuty::ProcessPayment { .. } => unimplemented!(),
             NodeDuty::ProcessInquiry {
                 inquiry,
                 msg_id,
                 origin,
             } => {
-                let elder = self.as_elder().await?.clone();
+                let elder = self.as_elder().await?;
                 let handle = tokio::spawn(async move {
                     Ok(NodeTask::from(vec![
                         elder
@@ -398,7 +400,7 @@ impl Node {
                 origin,
                 ..
             } => {
-                let elder = self.as_elder().await?.clone();
+                let elder = self.as_elder().await?;
                 let handle = tokio::spawn(async move {
                     Ok(NodeTask::from(vec![
                         elder

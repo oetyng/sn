@@ -8,11 +8,7 @@
 
 use super::Client;
 use crate::client::Error;
-use crate::messaging::{
-    data::{DataCmd, ServiceMsg},
-    cmd::ChargedOps,
-    ServiceAuth, WireMsg,
-};
+use crate::messaging::{cmd::BatchedWrites, cmd::Cmd, data::ServiceMsg, ServiceAuth, WireMsg};
 use crate::types::{PublicKey, Signature};
 use bytes::Bytes;
 use tracing::debug;
@@ -23,27 +19,25 @@ impl Client {
     /// provide the serialised and already signed command.
     pub async fn send_signed_command(
         &self,
-        ops: ChargedOps,
+        ops: BatchedWrites,
         client_pk: PublicKey,
         serialised_cmd: Bytes,
         signature: Signature,
     ) -> Result<(), Error> {
-        debug!("Sending: {:?}", cmd);
+        debug!("Sending: {:?}", ops);
         let auth = ServiceAuth {
             public_key: client_pk,
             signature,
         };
 
-        self.session
-            .send_cmd(ops, auth, serialised_cmd)
-            .await
+        self.session.send_cmd(ops, auth, serialised_cmd).await
     }
 
     // Send a DataCmd to the network without awaiting for a response.
     // This function is a helper private to this module.
-    pub(crate) async fn send_cmd(&self, cmd: ChargedOps) -> Result<(), Error> {
+    pub(crate) async fn send_cmd(&self, cmd: BatchedWrites) -> Result<(), Error> {
         let client_pk = self.public_key();
-        let msg = ServiceMsg::Cmd(cmd.clone());
+        let msg = ServiceMsg::Cmd(Cmd::BatchData(cmd.clone()));
         let serialised_cmd = WireMsg::serialize_msg_payload(&msg)?;
         let signature = self.keypair.sign(&serialised_cmd);
 

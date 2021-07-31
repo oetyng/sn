@@ -15,7 +15,7 @@ const MIN_REWARD_AGE: u8 = 6;
 /// Calculates reward for each public key
 /// proportional to the age of its node,
 /// out of the total amount supplied.
-pub fn distribute_rewards(
+pub(crate) fn calculate_distribution(
     amount: Token,
     nodes: BTreeMap<XorName, (NodeAge, PublicKey)>,
 ) -> BTreeMap<XorName, (NodeAge, PublicKey, Token)> {
@@ -136,7 +136,7 @@ mod test {
         let now = std::time::Instant::now();
 
         // calc
-        let rewards = distribute_rewards(amount, nodes);
+        let rewards = calculate_distribution(amount, nodes);
 
         // stop timer
         let duration = now.elapsed();

@@ -15,20 +15,20 @@ use tracing::debug;
 
 /// Calculation of rate limit for writes.
 #[derive(Clone)]
-pub struct OpCost {
+pub(crate) struct OpCost {
     capacity: CapacityReader,
     network: Network,
 }
 
 impl OpCost {
     /// gets a new instance of rate limit
-    pub fn new(network: Network, capacity: CapacityReader) -> OpCost {
+    pub(crate) fn new(network: Network, capacity: CapacityReader) -> OpCost {
         Self { capacity, network }
     }
 
     /// Calculates the rate limit of write operations,
     /// as a cost to be paid for a certain number of bytes.
-    pub async fn from(&self, bytes: u64) -> Result<Token> {
+    pub(crate) async fn from(&self, bytes: u64) -> Result<Token> {
         let prefix = self.network.our_prefix().await;
         let prefix_len = prefix.bit_count();
 

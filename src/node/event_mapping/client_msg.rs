@@ -60,7 +60,7 @@ fn map_client_service_msg(
             auth,
             origin,
         },
-        ServiceMsg::Cmd(Cmd::DataDbc(ops)) => NodeDuty::ProcessOps {
+        ServiceMsg::Cmd(Cmd::BatchData(ops)) => NodeDuty::ProcessOps {
             ops,
             msg_id,
             auth,

@@ -66,12 +66,12 @@ impl NodeInfo {
 }
 
 ///
-pub struct BlsKeyManager {
+pub(crate) struct BlsKeyManager {
     network: Network,
 }
 
 impl BlsKeyManager {
-    pub fn new(network: Network) -> Self {
+    pub(crate) fn new(network: Network) -> Self {
         Self { network }
     }
 }
@@ -111,7 +111,7 @@ impl KeyManager for BlsKeyManager {
         key: &bls::PublicKey,
         signature: &Signature,
     ) -> Result<()> {
-        self.verify_known_key(&key)
+        self.verify_known_key(key)
             .await
             .map_err(|e| Error::InvalidOperation(e.to_string()))?;
         if key.verify(signature, *msg_hash) {

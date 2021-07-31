@@ -6,6 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+mod batching;
 mod blob_apis;
 mod blob_storage;
 mod commands;
@@ -13,11 +14,11 @@ mod queries;
 mod register_apis;
 
 use crate::client::{config_handler::Config, connections::Session, errors::Error};
-use crate::messaging::cmd::ChargedOps;
-use crate::messaging::data::{CmdError, DataCmd, DataMsg, ProcessMsg};
-use crate::messaging::payment::{CostInquiry, GuaranteedQuote, PaymentReceipt, PointerEditHash};
+use crate::messaging::cmd::BatchedWrites;
+use crate::messaging::data::{CmdError, DataCmd, ServiceMsg};
+use crate::messaging::payment::{CostInquiry, GuaranteedQuote, PaymentReceipt};
 use crate::messaging::query::Query;
-use crate::messaging::{DataSigned, WireMsg};
+use crate::messaging::{ServiceAuth, WireMsg};
 use crate::types::{Chunk, ChunkAddress, Keypair, PublicKey};
 use lru::LruCache;
 use rand::rngs::OsRng;
@@ -135,17 +136,22 @@ impl Client {
 
     // Private helper to obtain payment proof for a data command, send it to the network,
     // and also apply the payment to local replica actor.
-    async fn pay_and_send_data_command(&self, cmds: BTreeSet<DataCmd>) -> Result<(), Error> {
+    async fn pay_and_send_data_command(&self, cmds: Vec<DataCmd>) -> Result<(), Error> {
         // Get quote for write
-        let quote = self.get_quote(cmds).await?;
+        let quote = self
+            .get_quote(CostInquiry {
+                chunks: BTreeSet::new(),
+                reg_ops: BTreeSet::new(),
+            })
+            .await?;
         // Generate payment matching the quote
         let payment = self.generate_payment(quote).await?;
 
         // The _actual_ message
-        let cmd = ChargedOps {
+        let cmd = BatchedWrites {
             uploads: Vec::new(),
             edits: Vec::new(),
-            payment: payment,
+            payment,
         };
 
         // Send the message to the network
@@ -154,19 +160,25 @@ impl Client {
 
     ///
     pub async fn get_quote(&self, inquiry: CostInquiry) -> Result<GuaranteedQuote, Error> {
-        let payment_xorname = inquiry.payment_xorname().map_err(|e| Error::NoResponse)?;
+        let peer = SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 2, 3, 4)),
+            1234,
+        );
 
-        self.session.send_get_section_query(payment_xorname).await;
-        let msg = DataMsg::Process(ProcessMsg::Query(Query::Payment(inquiry)));
+        let dst = inquiry.dst_address();
+        self.session
+            .send_get_section_query(inquiry.dst_address(), &peer)
+            .await?;
+        let query = Query::Payment(inquiry);
+        let msg = ServiceMsg::Query(query.clone());
         let serialized = WireMsg::serialize_msg_payload(&msg)?;
 
-        let client_signed = DataSigned {
+        let auth = ServiceAuth {
             public_key: self.keypair.public_key(),
             signature: self.keypair.sign(&serialized),
         };
 
-        self.session
-            .send_inquiry(serialized, payment_xorname, client_signed);
+        let _ = self.session.send_query(query, auth, serialized).await;
         unimplemented!()
     }
 

@@ -16,19 +16,19 @@ use xor_name::{Prefix, XorName};
 /// out of rewards to nodes for
 /// their work in the network.
 #[derive(Clone)]
-pub struct RewardWallets {
+pub(crate) struct RewardWallets {
     node_wallets: DashMap<XorName, (NodeAge, PublicKey)>,
 }
 
 impl RewardWallets {
-    pub fn new(node_wallets: BTreeMap<XorName, (NodeAge, PublicKey)>) -> Self {
+    pub(crate) fn new(node_wallets: BTreeMap<XorName, (NodeAge, PublicKey)>) -> Self {
         Self {
             node_wallets: node_wallets.into_iter().collect(),
         }
     }
 
     /// Returns the stage of a specific node.
-    pub fn get(&self, node_name: &XorName) -> Option<(NodeAge, PublicKey)> {
+    pub(crate) fn get(&self, node_name: &XorName) -> Option<(NodeAge, PublicKey)> {
         Some(*self.node_wallets.get(node_name)?)
     }
 
@@ -46,12 +46,12 @@ impl RewardWallets {
 
     /// Returns the node ids of all nodes.
     #[allow(unused)]
-    pub fn all_nodes(&self) -> Vec<XorName> {
+    pub(crate) fn all_nodes(&self) -> Vec<XorName> {
         self.node_wallets.iter().map(|r| *r.key()).collect()
     }
 
     ///
-    pub fn node_wallets(&self) -> BTreeMap<XorName, (NodeAge, PublicKey)> {
+    pub(crate) fn node_wallets(&self) -> BTreeMap<XorName, (NodeAge, PublicKey)> {
         self.node_wallets
             .clone()
             .into_read_only()
@@ -63,7 +63,7 @@ impl RewardWallets {
     /// Removes a subset of the nodes,
     /// more specifically those no longer
     /// part of this section, after a split.
-    pub fn keep_wallets_of(&self, prefix: Prefix) {
+    pub(crate) fn keep_wallets_of(&self, prefix: Prefix) {
         // Removes keys that are no longer our section responsibility.
         let keys = self
             .node_wallets
@@ -82,13 +82,13 @@ impl RewardWallets {
 
     /// A new node registers a wallet id for future reward payout.
     /// ... or, an active node updates its wallet.
-    pub fn set_node_wallet(&self, node_name: XorName, age: NodeAge, wallet: PublicKey) {
+    pub(crate) fn set_node_wallet(&self, node_name: XorName, age: NodeAge, wallet: PublicKey) {
         let _ = self.node_wallets.insert(node_name, (age, wallet));
     }
 
     /// When the section becomes aware that a node has left,
     /// its reward key is removed.
-    pub fn remove_wallet(&self, node_name: XorName) {
+    pub(crate) fn remove_wallet(&self, node_name: XorName) {
         let _ = self.node_wallets.remove(&node_name);
     }
 }

@@ -8,10 +8,8 @@
 
 use super::Client;
 use crate::client::{connections::QueryResult, errors::Error};
-use crate::messaging::{
-    data::{DataQuery, ServiceMsg},
-    ServiceAuth, WireMsg,
-};
+use crate::messaging::query::Query;
+use crate::messaging::{data::ServiceMsg, ServiceAuth, WireMsg};
 use crate::types::{PublicKey, Signature};
 use bytes::Bytes;
 use tracing::debug;
@@ -22,7 +20,7 @@ impl Client {
     /// provide the serialised and already signed query.
     pub(crate) async fn send_signed_query(
         &self,
-        query: DataQuery,
+        query: Query,
         client_pk: PublicKey,
         serialised_query: Bytes,
         signature: Signature,
@@ -32,13 +30,12 @@ impl Client {
             public_key: client_pk,
             signature,
         };
-
         self.session.send_query(query, auth, serialised_query).await
     }
 
     // Send a Query to the network and await a response.
     // This function is a helper private to this module.
-    pub(crate) async fn send_query(&self, query: DataQuery) -> Result<QueryResult, Error> {
+    pub(crate) async fn send_query(&self, query: Query) -> Result<QueryResult, Error> {
         let client_pk = self.public_key();
         let msg = ServiceMsg::Query(query.clone());
         let serialised_query = WireMsg::serialize_msg_payload(&msg)?;

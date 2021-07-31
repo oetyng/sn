@@ -12,10 +12,10 @@ mod op_cost;
 use crate::node::metadata::adult_reader::AdultReader;
 use crate::routing::{Prefix, XorName};
 pub(super) use adult_storage_info::AdultsStorageInfo;
-pub use op_cost::OpCost;
+pub(super) use op_cost::OpCost;
 use std::collections::BTreeSet;
 
-pub const MAX_SUPPLY: u64 = u32::MAX as u64 * 1_000_000_000_u64;
+pub(crate) const MAX_SUPPLY: u64 = u32::MAX as u64 * 1_000_000_000_u64;
 // The number of separate copies of a blob chunk which should be maintained.
 pub(crate) const CHUNK_COPY_COUNT: usize = 4;
 pub(crate) const MAX_CHUNK_SIZE: u64 = 1_000_000;
@@ -77,7 +77,7 @@ impl Capacity {
 }
 
 #[derive(Clone)]
-pub(super) struct CapacityReader {
+pub(crate) struct CapacityReader {
     reader: AdultReader,
     adult_storage_info: AdultsStorageInfo,
 }

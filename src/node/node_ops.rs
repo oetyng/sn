@@ -7,7 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::{
-    cmd::ChargedOps,
+    cmd::BatchedWrites,
     data::{
         ChunkRead, ChunkWrite, DataCmd, DataExchange, DataQuery, QueryResponse, ServiceError,
         ServiceMsg,
@@ -155,7 +155,7 @@ pub enum NodeDuty {
     },
     /// Process paid ops
     ProcessOps {
-        ops: ChargedOps,
+        ops: BatchedWrites,
         msg_id: MessageId,
         auth: AuthorityProof<ServiceAuth>,
         origin: EndUser,
