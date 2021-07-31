@@ -31,6 +31,14 @@ pub enum DataCmd {
     Register(RegisterWrite),
 }
 
+impl crate::dbs::Key for XorName {}
+impl crate::dbs::Value for DataCmd {
+    type Key = XorName;
+    fn key(&self) -> &Self::Key {
+        &XorName::from_content(&[&crate::dbs::serialise(self).unwrap()])
+    }
+}
+
 impl DataCmd {
     /// Creates a Response containing an error, with the Response variant corresponding to the
     /// command variant.

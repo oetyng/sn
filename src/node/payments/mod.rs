@@ -116,11 +116,11 @@ impl Payments {
     }
 
     async fn cost(&self, inquiry: CostInquiry) -> Result<GuaranteedQuoteShare> {
-        if inquiry.chunks.is_empty() && inquiry.reg_ops.is_empty() {
+        if inquiry.chunk_ops.is_empty() && inquiry.reg_ops.is_empty() {
             return Err(Error::InvalidOperation("No data provided".to_string()));
         }
 
-        let units = (inquiry.chunks.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES)
+        let units = (inquiry.chunk_ops.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES)
             + (inquiry.reg_ops.len() as u64 * MAX_CHUNK_SIZE_IN_BYTES / 10);
 
         let cost = self.cost.from(units).await?;

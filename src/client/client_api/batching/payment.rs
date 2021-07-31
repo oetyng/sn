@@ -6,9 +6,14 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::{messaging::data::RegisterWrite, types::Token};
+use crate::{
+    client::{Error, Result},
+    dbs::{KvStore, Value},
+    messaging::data::{ChunkWrite, DataCmd, RegisterWrite},
+    types::{utils::serialise, Chunk, Token},
+};
 
-use dashmap::{DashMap, DashSet};
+use dashmap::DashSet;
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{rngs::OsRng, Rng};
@@ -51,12 +56,13 @@ pub(crate) struct Batch {
 struct OpId(pub(crate) XorName);
 
 type PaymentJob = DashSet<OpId>;
-type Pools = Arc<RwLock<DashMap<u8, PaymentJob>>>;
+//type Pools = Arc<RwLock<DashMap<u8, PaymentJob>>>;
+type Pools<S: Stash> = PaymentPools<S>;
 
-type Db = Arc<sled::Db>;
+type Db = Arc<KvStore<XorName, DataCmd>>;
 
 /// A stash of tokens
-pub(crate) trait Stash: Clone {
+pub(crate) trait Stash: Clone + Send + Sync {
     /// The total value of the stash.
     fn value(&self) -> Token;
     /// Removes and returns dbcs up to the requested
@@ -68,7 +74,7 @@ pub(crate) struct Dbc {}
 
 struct PaymentBatching<S: Stash> {
     db: Db,
-    pools: Pools,
+    pools: Pools<S>,
     pool_limit: usize,
     stash: S,
 }
@@ -97,7 +103,7 @@ impl<S: Stash> PaymentBatching<S> {
     }
 }
 
-async fn push_task(batch: Batch, db: Db, pools: Pools, pool_limit: usize) {
+async fn push_task<S: Stash>(batch: Batch, db: Db, pools: Pools<S>, pool_limit: usize) {
     let Batch {
         files,
         reg_ops,
@@ -123,46 +129,32 @@ async fn push_task(batch: Batch, db: Db, pools: Pools, pool_limit: usize) {
 
     let _ = join_all(res).await;
 
-    try_clear_pools(db, pools, pool_limit).await;
-}
-
-// todo: let pools be persisted
-// do not clear pools, but use new pools
-// only clear after all processing is done
-async fn try_clear_pools(db: Db, pools: Pools, pool_limit: usize) {
-    // take exclusive lock on the pools
-    let pool = pools.write().await;
     // if all pools have reached the limit...
-    if pool.iter().all(|set| set.value().len() >= pool_limit) {
-        // ... then kick off payment process, and clear the pools
-        let _ = pool
-            .iter()
-            .map(|set| {
-                set.value()
-                    .iter()
-                    .map(|s| OpId(s.0))
-                    .collect::<BTreeSet<_>>()
-            })
-            .map(|set| (set, db.clone()))
-            .map(|(set, db)| task::spawn(pay(set, db)))
-            .collect_vec();
-
-        pool.clear();
+    if let Ok(Some(previous_version)) = pools.try_move_to_new().await {
+        // ... then kick off payment process for the filled pools
+        let _ = task::spawn(pay(previous_version, db));
     }
 }
 
-async fn process_reg_ops(reg_ops: BTreeSet<RegisterWrite>, pools: Pools) -> Vec<JoinHandle<()>> {
-    unimplemented!()
-}
-
-async fn process_msg_quotas(
-    msg_quotas: BTreeMap<XorName, u64>,
-    pools: Pools,
+async fn process_reg_ops<S: Stash>(
+    reg_ops: BTreeSet<RegisterWrite>,
+    pools: Pools<S>,
 ) -> Vec<JoinHandle<()>> {
     unimplemented!()
 }
 
-async fn process_files(files: BTreeSet<PathBuf>, db: Db, pools: Pools) -> Vec<JoinHandle<()>> {
+async fn process_msg_quotas<S: Stash>(
+    msg_quotas: BTreeMap<XorName, u64>,
+    pools: Pools<S>,
+) -> Vec<JoinHandle<()>> {
+    unimplemented!()
+}
+
+async fn process_files<S: Stash>(
+    files: BTreeSet<PathBuf>,
+    db: Db,
+    pools: Pools<S>,
+) -> Vec<JoinHandle<Result<()>>> {
     // get chunks via SE (+ store to db), then pool them
     let handles = files
         .into_iter()
@@ -175,6 +167,7 @@ async fn process_files(files: BTreeSet<PathBuf>, db: Db, pools: Pools) -> Vec<Jo
         .into_iter()
         .flatten()
         .flatten()
+        .map(|c| DataCmd::Chunk(ChunkWrite::New(c)))
         .collect_vec();
 
     // shuffle chunks before adding to pools
@@ -182,33 +175,157 @@ async fn process_files(files: BTreeSet<PathBuf>, db: Db, pools: Pools) -> Vec<Jo
     use rand::seq::SliceRandom;
     chunks.shuffle(&mut rng);
 
-    vec![task::spawn(add_to_pools(chunks, pools))]
+    vec![task::spawn(add_to_pools(chunks, db, pools))]
 }
 
-fn get_chunks(file: PathBuf, db: Db) -> Vec<XorName> {
+fn get_chunks(file: PathBuf, db: Db) -> Vec<Chunk> {
     // let chunks = self_encryptor.encrypt(file);
-    // db.store(chunks)
-    // return chunk names
-    vec![]
+    let chunks = vec![];
+
+    // return chunks
+    chunks
 }
 
-async fn add_to_pools(ids: Vec<XorName>, pools: Pools) {
-    let pool_ref = pools.read().await;
-    let pool_count = pool_ref.len() as u8;
-    let mut rng = OsRng;
-    for id in ids {
-        let index = rng.gen_range(0, pool_count);
-        if let Some(pool) = pool_ref.get(&index) {
-            let _ = pool.value().insert(OpId(id));
-        }
-    }
+async fn add_to_pools<S: Stash>(ops: Vec<DataCmd>, db: Db, pools: Pools<S>) -> Result<(), Error> {
+    //db.store_batch(&ops).await.map_err(Error::Database)?;
+    let ops = ops.into_iter().map(|c| (*c.key(), c)).collect();
+    pools.add(ops).await
 }
 
-async fn pay(ops: BTreeSet<OpId>, db: Arc<sled::Db>) {
+async fn pay(pool_version: u64, db: Db) {
     // kick off payment process
     // get quote
 }
 
-fn send(ops: BTreeSet<OpId>, db: Arc<sled::Db>) {
+fn send(ops: BTreeSet<OpId>, db: Db) {
     // kick off sending process
+}
+
+enum OpType {
+    Chunk,
+    Register,
+}
+struct Status {
+    op_type: OpType,
+}
+
+#[derive(Clone)]
+struct PaymentPools<S: Stash> {
+    db: Arc<sled::Db>,
+    pool_version: Arc<RwLock<u64>>,
+    pool_limit: usize,
+    pool_count: u8,
+    stash: S,
+}
+
+impl<S: Stash> PaymentPools<S> {
+    pub fn new(
+        db: Arc<sled::Db>,
+        pool_version: Arc<RwLock<u64>>,
+        pool_limit: usize,
+        pool_count: u8,
+        stash: S,
+    ) -> Result<Self, Error> {
+        for i in 0..pool_count {
+            let tree = db
+                .open_tree(format!("payment_pool_{}", i))
+                .map_err(Error::Sled)?;
+        }
+
+        Ok(Self {
+            db,
+            pool_version,
+            pool_limit,
+            pool_count,
+            stash,
+        })
+    }
+
+    fn get_keys(&self) -> Vec<XorName> {
+        (0..self.pool_count)
+            .into_iter()
+            .map(|i| self.db.open_tree(format!("payment_pool_{}", i)))
+            .flatten()
+            .map(|tree| tree.iter().keys())
+            .flatten()
+            .flatten()
+            .map(|key| convert(key))
+            .collect()
+    }
+
+    // does not clear pools, but uses new pools
+    // only clear after all processing is done
+    async fn try_move_to_new(&self) -> Result<Option<u64>, Error> {
+        {
+            let version = self.pool_version.read().await;
+            for i in 0..self.pool_count {
+                let tree = self
+                    .db
+                    .open_tree(format!("payment_pool_{}_v{}", i, version))
+                    .map_err(Error::Sled)?;
+
+                if !tree.len() >= self.pool_limit {
+                    return Ok(None);
+                }
+            }
+        }
+
+        let mut version = self.pool_version.write().await;
+        let previous_version = version.clone();
+
+        match version.checked_add(1) {
+            None => return Err(Error::NoResponse), // TODO: Error::PoolVersionOverflow
+            Some(next_version) => *version = next_version,
+        };
+
+        Ok(Some(previous_version))
+    }
+
+    async fn add(&self, ops: BTreeMap<XorName, DataCmd>) -> Result<(), Error> {
+        use rayon::iter::*;
+        let results: Vec<_> = ops
+            .par_iter()
+            .map(|(id, job)| {
+                let mut rng = OsRng;
+                let index = rng.gen_range(0, self.pool_count);
+                let key = serialise(&id)?;
+                let value = serialise(&job)?;
+                Ok::<(u8, (Vec<u8>, Vec<u8>)), Error>((index, (key, value)))
+            })
+            .flatten()
+            .collect();
+
+        let results: BTreeMap<u8, Vec<(Vec<u8>, Vec<u8>)>> = results
+            .into_iter()
+            .group_by(|(index, _)| *index)
+            .into_iter()
+            .map(|(key, group)| (key, group.map(|(_, v)| v).collect_vec()))
+            .collect();
+
+        // for (id, job) in ops {
+        //     let index = rng.gen_range(0, self.pool_count);
+        //     if let Some(batch) = pools.get_mut(&index) {
+        //         let key = serialise(&id)?;
+        //         let value = serialise(&job)?;
+        //         let _ = batch.insert(key, value);
+        //     }
+        // }
+
+        // take exclusive lock on version, to make sure we add to current version of pools
+        let version = self.pool_version.write().await;
+
+        for (i, pairs) in results {
+            let tree = self
+                .db
+                .open_tree(format!("payment_pool_{}_v{}", i, version))
+                .map_err(Error::Sled)?;
+            let mut batch = sled::Batch::default();
+            for (key, value) in pairs {
+                batch.insert(key, value);
+            }
+            tree.apply_batch(batch)?;
+        }
+
+        Ok(())
+    }
 }

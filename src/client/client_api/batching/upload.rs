@@ -47,11 +47,8 @@ pub(crate) struct Batch {
 #[derive(Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 struct OpId(pub(crate) XorName);
 
-type PaymentJob = DashSet<OpId>;
-type Pools = Arc<RwLock<DashMap<u8, PaymentJob>>>;
-
 type UploadJob = DashSet<OpId>;
-type UploadPools = Arc<RwLock<DashMap<XorName, UploadJob>>>;
+type Pools = Arc<RwLock<DashMap<XorName, UploadJob>>>;
 
 type Db = Arc<sled::Db>;
 
@@ -66,14 +63,14 @@ pub(crate) trait Stash {
 
 pub(crate) struct Dbc {}
 
-struct PaymentBatching<S: Stash> {
+struct UploadBatching<S: Stash> {
     db: Db,
     pools: Pools,
     pool_limit: usize,
     stash: S,
 }
 
-impl<S: Stash> PaymentBatching<S> {
+impl<S: Stash> UploadBatching<S> {
     // pub fn new(pool_count: u8, pool_limit: usize, stash: S) -> Result<Self, Error> {
     //     let mut pools = DashMap::new();
     //     for i in 0..pool_count {

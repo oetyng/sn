@@ -113,29 +113,29 @@ pub struct PaymentReceipt {
     ///
     pub sig: bls::Signature,
     ///
-    pub key_set: bls::PublicKeySet,
+    pub key: bls::PublicKey,
 }
 
 ///
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub struct PointerEditHash(pub XorName);
+pub struct RegOpHash(pub XorName);
 ///
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub struct ChunkHash(pub XorName);
+pub struct ChunkOpHash(pub XorName);
 
 /// Cost inquiry for a batch of ops
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct CostInquiry {
-    /// Batch of chunks to be uploaded
-    pub chunks: BTreeSet<ChunkHash>,
+    /// Batch of chunk ops
+    pub chunk_ops: BTreeSet<ChunkOpHash>,
     /// Batch of reg ops
-    pub reg_ops: BTreeSet<PointerEditHash>,
+    pub reg_ops: BTreeSet<RegOpHash>,
 }
 
 impl CostInquiry {
     ///
-    pub fn new(chunks: BTreeSet<ChunkHash>, reg_ops: BTreeSet<PointerEditHash>) -> Self {
-        Self { chunks, reg_ops }
+    pub fn new(chunk_ops: BTreeSet<ChunkOpHash>, reg_ops: BTreeSet<RegOpHash>) -> Self {
+        Self { chunk_ops, reg_ops }
     }
     /// Creates a QueryResponse containing an error, with the QueryResponse variant corresponding to the
     /// Request variant.
@@ -145,21 +145,21 @@ impl CostInquiry {
 
     /// Returns the address of the destination for the query.
     pub fn dst_address(&self) -> XorName {
-        self.chunks
+        self.chunk_ops
             .iter()
             .map(|c| c.0)
             .chain(self.reg_ops.iter().map(|e| e.0))
-            .reduce(Self::xor)
+            .reduce(xor)
             .unwrap_or_default()
     }
+}
 
-    fn xor(a: XorName, b: XorName) -> XorName {
-        let mut init = a.0;
-        for (i, byte) in b.0.iter().enumerate() {
-            init[i] ^= *byte;
-        }
-        XorName(init)
+fn xor(a: XorName, b: XorName) -> XorName {
+    let mut bytes = a.0;
+    for (i, byte) in b.0.iter().enumerate() {
+        bytes[i] ^= *byte;
     }
+    XorName(bytes)
 }
 
 impl PaymentCmd {

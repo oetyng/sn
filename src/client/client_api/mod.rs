@@ -140,7 +140,7 @@ impl Client {
         // Get quote for write
         let quote = self
             .get_quote(CostInquiry {
-                chunks: BTreeSet::new(),
+                chunk_ops: BTreeSet::new(),
                 reg_ops: BTreeSet::new(),
             })
             .await?;
