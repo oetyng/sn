@@ -44,7 +44,7 @@ pub(super) trait NetworkUtils {
     /// Update our knowledge of a remote section's SAP only
     /// if it's verifiable with the provided proof chain.
     fn update_remote_section_sap(
-        &mut self,
+        &self,
         signed_section_auth: SectionAuth<SectionAuthorityProvider>,
         proof_chain: &SecuredLinkedList,
         our_section_chain: &SecuredLinkedList,
@@ -119,7 +119,7 @@ impl NetworkUtils for Network {
     /// Update our knowledge of a remote section's SAP only
     /// if it's verifiable with the provided proof chain.
     fn update_remote_section_sap(
-        &mut self,
+        &self,
         signed_section_auth: SectionAuth<SectionAuthorityProvider>,
         proof_chain: &SecuredLinkedList,
         our_section_chain: &SecuredLinkedList,

@@ -114,7 +114,7 @@ impl Core {
     }
 
     pub(crate) fn handle_section_knowledge_msg(
-        &mut self,
+        &self,
         signed_section_auth: SectionAuth<SectionAuthorityProvider>,
         proof_chain: SecuredLinkedList,
         msg: Option<Box<NodeMsg>>,

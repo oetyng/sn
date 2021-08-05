@@ -182,7 +182,7 @@ impl Core {
     // Hanlder for node messages which have successfully
     // passed all signature checks and msg verifications
     async fn handle_verified_node_message(
-        &mut self,
+        &self,
         sender: SocketAddr,
         msg_id: MessageId,
         msg_authority: NodeMsgAuthority,
