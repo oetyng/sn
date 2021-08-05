@@ -7,10 +7,9 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::node::{KeyedSig, SigShare};
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use dashmap::DashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tiny_keccak::{Hasher, Sha3};
 
@@ -32,8 +31,9 @@ type Digest256 = [u8; 32];
 /// otherwise lead to invalid signature to be produced even though all the shares are valid.
 ///
 #[allow(missing_debug_implementations)]
+#[derive(Clone)]
 pub(crate) struct SignatureAggregator {
-    map: HashMap<Digest256, State>,
+    map: Arc<DashMap<Digest256, State>>,
     expiration: Duration,
 }
 
@@ -46,7 +46,7 @@ impl SignatureAggregator {
     /// Create new aggregator with the given expiration.
     pub(crate) fn with_expiration(expiration: Duration) -> Self {
         Self {
-            map: Default::default(),
+            map: Arc::new(Default::default()),
             expiration,
         }
     }
@@ -59,7 +59,7 @@ impl SignatureAggregator {
     /// shares still need to be added for that particular payload. This error could be safely
     /// ignored (it might still be useful perhaps for debugging). The other error variants, however,
     /// indicate failures and should be treated a such. See [Error] for more info.
-    pub(crate) fn add(&mut self, payload: &[u8], sig_share: SigShare) -> Result<KeyedSig, Error> {
+    pub(crate) fn add(&self, payload: &[u8], sig_share: SigShare) -> Result<KeyedSig, Error> {
         self.remove_expired();
 
         if !sig_share.verify(payload) {
@@ -86,7 +86,7 @@ impl SignatureAggregator {
             })
     }
 
-    fn remove_expired(&mut self) {
+    fn remove_expired(&self) {
         let expiration = self.expiration;
         self.map
             .retain(|_, state| state.modified.elapsed() < expiration)
@@ -117,14 +117,14 @@ pub enum Error {
 }
 
 struct State {
-    shares: HashMap<usize, bls::SignatureShare>,
+    shares: Arc<DashMap<usize, bls::SignatureShare>>,
     modified: Instant,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            shares: Default::default(),
+            shares: Arc::new(Default::default()),
             modified: Instant::now(),
         }
     }
@@ -144,7 +144,10 @@ impl State {
         if self.shares.len() > sig_share.public_key_set.threshold() {
             let signature = sig_share
                 .public_key_set
-                .combine_signatures(self.shares.iter().map(|(&index, share)| (index, share)))
+                .combine_signatures(self.shares.iter().map(|entry| {
+                    // let (index, share) =
+                    entry.pair()
+                }))
                 .map_err(Error::Combine)?;
             self.shares.clear();
 

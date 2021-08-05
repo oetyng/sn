@@ -106,7 +106,7 @@ impl Core {
 
     // Handler for all node messages
     async fn handle_node_message(
-        &mut self,
+        &self,
         sender: SocketAddr,
         msg_id: MessageId,
         mut msg_authority: NodeMsgAuthority,
@@ -580,7 +580,7 @@ impl Core {
     // authority on successful accumulation. Also return 'true' if
     // current message shall not be processed any further.
     fn aggregate_message_and_stop(
-        &mut self,
+        &self,
         msg_authority: &mut NodeMsgAuthority,
         payload: Bytes,
     ) -> Result<bool> {
@@ -591,7 +591,7 @@ impl Core {
         };
 
         match SectionAuth::try_authorize(
-            &mut self.message_aggregator,
+            &self.message_aggregator,
             bls_share_auth.clone().into_inner(),
             &payload,
         ) {

@@ -96,7 +96,7 @@ pub struct SectionAuth {
 impl SectionAuth {
     /// Try to construct verified section authority by aggregating a new share.
     pub(crate) fn try_authorize(
-        aggregator: &mut SignatureAggregator,
+        aggregator: &SignatureAggregator,
         share: BlsShareAuth,
         payload: impl AsRef<[u8]>,
     ) -> Result<AuthorityProof<Self>, AggregatorError> {
