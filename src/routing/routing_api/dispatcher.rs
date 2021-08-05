@@ -333,7 +333,7 @@ impl Dispatcher {
     pub(super) async fn send_wire_message(&self, mut wire_msg: WireMsg) -> Result<Vec<Command>> {
         if let DstLocation::EndUser(EndUser { socket_id, xorname }) = wire_msg.dst_location() {
             if self.core.read().await.section().prefix().matches(xorname) {
-                let addr = self.core.read().await.get_socket_addr(*socket_id).copied();
+                let addr = self.core.read().await.get_socket_addr(*socket_id);
 
                 if let Some(socket_addr) = addr {
                     // Send a message to a client peer.

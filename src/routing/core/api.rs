@@ -63,15 +63,15 @@ impl Core {
         )
     }
 
-    pub(crate) fn get_enduser_by_addr(&self, sender: &SocketAddr) -> Option<&EndUser> {
+    pub(crate) fn get_enduser_by_addr(&self, sender: &SocketAddr) -> Option<EndUser> {
         self.end_users.get_enduser_by_addr(sender)
     }
 
-    pub(crate) fn get_socket_addr(&self, id: SocketId) -> Option<&SocketAddr> {
+    pub(crate) fn get_socket_addr(&self, id: SocketId) -> Option<SocketAddr> {
         self.end_users.get_socket_addr(id)
     }
 
-    pub(crate) fn try_add_enduser(&mut self, sender: SocketAddr) -> Result<EndUser> {
+    pub(crate) fn try_add_enduser(&self, sender: SocketAddr) -> Result<EndUser> {
         let section_prefix = self.section.prefix();
         self.end_users.try_add(sender, section_prefix)
     }
