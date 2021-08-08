@@ -19,32 +19,35 @@ mod section_info;
 mod sync;
 
 use super::Core;
-use crate::messaging::{
-    data::{DataCmd, DataQuery, ServiceMsg},
-    node::{NodeCmd, NodeMsg, NodeQuery, Proposal},
-    AuthorityProof, DstLocation, MessageId, MessageType, MsgKind, NodeMsgAuthority, SectionAuth,
-    ServiceAuth, WireMsg,
-};
 use crate::routing::{
     core::AggregatorError,
     error::{Error, Result},
     messages::{NodeMsgAuthorityUtils, WireMsgUtils},
-    network::NetworkUtils,
-    relocation::RelocateState,
+    network::NetworkLogic,
+    relocation::RelocationStatus,
     routing_api::command::Command,
-    section::SectionUtils,
+    section::SectionLogic,
     Event, MessageReceived, SectionAuthorityProviderUtils,
 };
 use crate::types::{Chunk, Keypair, PublicKey};
+use crate::{
+    messaging::{
+        data::{DataCmd, DataQuery, ServiceMsg},
+        node::{NodeCmd, NodeMsg, NodeQuery, Proposal},
+        AuthorityProof, DstLocation, MessageId, MessageType, MsgKind, NodeMsgAuthority,
+        SectionAuth, ServiceAuth, WireMsg,
+    },
+    routing::section::Section,
+};
 use bls::PublicKey as BlsPublicKey;
 use bytes::Bytes;
 use rand::rngs::OsRng;
-use std::{collections::BTreeSet, iter, net::SocketAddr};
+use std::{collections::BTreeSet, net::SocketAddr};
 use xor_name::XorName;
 // Message handling
 impl Core {
     pub(crate) async fn handle_message(
-        &mut self,
+        &self,
         sender: SocketAddr,
         wire_msg: WireMsg,
     ) -> Result<Vec<Command>> {
@@ -53,7 +56,7 @@ impl Core {
         let dst_location = wire_msg.dst_location();
         let msg_id = wire_msg.msg_id();
         if !wire_msg.is_client_msg_kind()
-            && !dst_location.contains(&self.node.name(), self.section.prefix())
+            && !dst_location.contains(&self.node.name(), &self.section.prefix().await)
         {
             // Message is not for us
             info!("Relay message {} closer to the destination", msg_id);
@@ -116,18 +119,24 @@ impl Core {
     ) -> Result<Vec<Command>> {
         // Let's now verify the section key in the msg authority is trusted
         // based on our current knowledge of the network and sections chains.
-        let known_keys: Vec<BlsPublicKey> = self
-            .section
-            .chain()
-            .keys()
-            .copied()
-            .chain(self.network.keys().map(|(_, key)| key))
-            .chain(iter::once(*self.section.genesis_key()))
-            .collect();
-
+        let known_keys: Vec<BlsPublicKey> = {
+            let network = self.network.get().await;
+            let network_keys: Vec<_> = network
+                .keys()
+                .await
+                .into_iter()
+                .map(|(_, key)| key)
+                .collect();
+            let mut section_keys: Vec<_> = self.section.keys().await.collect();
+            section_keys.extend(network_keys);
+            section_keys.push(*self.section.genesis_key());
+            section_keys
+        };
         if !msg_authority.verify_src_section_key(&known_keys) {
             debug!("Untrusted message from {:?}: {:?} ", sender, node_msg);
-            let cmd = self.handle_untrusted_message(sender, node_msg, msg_authority)?;
+            let cmd = self
+                .handle_untrusted_message(sender, node_msg, msg_authority)
+                .await?;
             return Ok(vec![cmd]);
         }
         trace!(
@@ -169,7 +178,9 @@ impl Core {
                     );
                 }
                 Err(Error::InvalidSignatureShare) => {
-                    let cmd = self.handle_untrusted_message(sender, node_msg, msg_authority)?;
+                    let cmd = self
+                        .handle_untrusted_message(sender, node_msg, msg_authority)
+                        .await?;
                     commands.push(cmd);
                 }
                 Ok(true) | Err(_) => {}
@@ -227,24 +238,28 @@ impl Core {
                     src_name,
                     sender,
                 )
+                .await
             }
             NodeMsg::Sync {
                 ref section,
                 ref network,
             } => {
+                let section = Section::from(section.clone());
                 // Ignore `Sync` not for our section.
-                if !section.prefix().matches(&self.node.name()) {
+                if !section.prefix().await.matches(&self.node.name()) {
                     return Ok(vec![]);
                 }
 
-                if section.chain().check_trust(known_keys.iter()) {
+                if section.check_trust(known_keys.iter()).await {
                     self.handle_sync(section, network).await
                 } else {
                     debug!(
                         "Untrusted Sync message from {:?} and section: {:?} ",
                         sender, section
                     );
-                    let cmd = self.handle_untrusted_message(sender, node_msg, msg_authority)?;
+                    let cmd = self
+                        .handle_untrusted_message(sender, node_msg, msg_authority)
+                        .await?;
                     Ok(vec![cmd])
                 }
             }
@@ -274,8 +289,7 @@ impl Core {
                     .await
             }
             NodeMsg::JoinAsRelocatedRequest(join_request) => {
-                if self.is_not_elder()
-                    && join_request.section_key == *self.section.chain().last_key()
+                if self.is_not_elder() && join_request.section_key == self.section.last_key().await
                 {
                     return Ok(vec![]);
                 }
@@ -290,20 +304,21 @@ impl Core {
             NodeMsg::BouncedUntrustedMessage {
                 msg: bounced_msg,
                 dst_section_pk,
-            } => Ok(vec![self.handle_bounced_untrusted_message(
-                msg_authority.peer(sender)?,
-                dst_section_pk,
-                *bounced_msg,
-            )?]),
+            } => Ok(vec![
+                self.handle_bounced_untrusted_message(
+                    msg_authority.peer(sender)?,
+                    dst_section_pk,
+                    *bounced_msg,
+                )
+                .await?,
+            ]),
             NodeMsg::SectionKnowledgeQuery {
                 last_known_key,
                 msg: returned_msg,
-            } => Ok(vec![self.handle_section_knowledge_query(
-                last_known_key,
-                returned_msg,
-                sender,
-                src_name,
-            )?]),
+            } => Ok(vec![
+                self.handle_section_knowledge_query(last_known_key, returned_msg, sender, src_name)
+                    .await?,
+            ]),
             NodeMsg::DkgStart {
                 dkg_key,
                 elder_candidates,
@@ -311,19 +326,21 @@ impl Core {
                 if !elder_candidates.elders.contains_key(&self.node.name()) {
                     return Ok(vec![]);
                 }
-
-                self.handle_dkg_start(dkg_key, elder_candidates)
+                self.handle_dkg_start(dkg_key, elder_candidates).await
             }
             NodeMsg::DkgMessage { dkg_key, message } => {
-                self.handle_dkg_message(dkg_key, message, src_name)
+                self.handle_dkg_message(dkg_key, message, src_name).await
             }
             NodeMsg::DkgFailureObservation {
                 dkg_key,
                 sig,
                 failed_participants,
-            } => self.handle_dkg_failure_observation(dkg_key, &failed_participants, sig),
+            } => {
+                self.handle_dkg_failure_observation(dkg_key, &failed_participants, sig)
+                    .await
+            }
             NodeMsg::DkgFailureAgreement(sig_set) => {
-                self.handle_dkg_failure_agreement(&src_name, &sig_set)
+                self.handle_dkg_failure_agreement(&src_name, &sig_set).await
             }
             NodeMsg::Propose {
                 ref content,
@@ -332,8 +349,10 @@ impl Core {
                 // Any other proposal than SectionInfo needs to be signed by a known key.
                 match content {
                     Proposal::SectionInfo(ref section_auth) => {
-                        if section_auth.prefix == *self.section.prefix()
-                            || section_auth.prefix.is_extension_of(self.section.prefix())
+                        if section_auth.prefix == self.section.prefix().await
+                            || section_auth
+                                .prefix
+                                .is_extension_of(&self.section.prefix().await)
                         {
                             // This `SectionInfo` is proposed by the DKG participants and is signed by the new
                             // key created by the DKG so we don't know it yet. We only require the src_name of the
@@ -346,11 +365,12 @@ impl Core {
                     _ => {
                         if !self
                             .section
-                            .chain()
                             .has_key(&sig_share.public_key_set.public_key())
+                            .await
                         {
-                            let cmd =
-                                self.handle_untrusted_message(sender, node_msg, msg_authority)?;
+                            let cmd = self
+                                .handle_untrusted_message(sender, node_msg, msg_authority)
+                                .await?;
                             return Ok(vec![cmd]);
                         }
                     }
@@ -358,7 +378,7 @@ impl Core {
 
                 let mut commands = vec![];
 
-                commands.extend(self.check_lagging((src_name, sender), sig_share)?);
+                commands.extend(self.check_lagging((src_name, sender), sig_share).await?);
 
                 let result = self.handle_proposal(content.clone(), sig_share.clone())?;
                 commands.extend(result);
@@ -370,16 +390,29 @@ impl Core {
                 Ok(vec![])
             }
             NodeMsg::JoinAsRelocatedResponse(join_response) => {
-                if let Some(RelocateState::InProgress(ref mut joining_as_relocated)) =
-                    self.relocate_state.as_mut()
-                {
-                    if let Some(cmd) = joining_as_relocated
-                        .handle_join_response(*join_response, sender)
-                        .await?
-                    {
-                        return Ok(vec![cmd]);
+                if let Some(status) = self.relocation_state.get() {
+                    match status.as_ref() {
+                        RelocationStatus::InProgress(joining_as_relocated) => {
+                            if let Some(cmd) = joining_as_relocated
+                                .handle_join_response(*join_response, sender)
+                                .await?
+                            {
+                                return Ok(vec![cmd]);
+                            }
+                        }
+                        _ => (),
                     }
                 }
+                // if let Some(RelocationStatus::InProgress(joining_as_relocated)) =
+                //     self.relocation_state.get()
+                // {
+                //     if let Some(cmd) = joining_as_relocated
+                //         .handle_join_response(*join_response, sender)
+                //         .await?
+                //     {
+                //         return Ok(vec![cmd]);
+                //     }
+                // }
 
                 Ok(vec![])
             }
@@ -516,6 +549,7 @@ impl Core {
             let aggregation = false;
 
             self.send_node_msg_to_targets(msg, target_holders, aggregation)
+                .await
         } else {
             error!("Received unexpected message while Adult");
             Ok(vec![])
@@ -523,7 +557,7 @@ impl Core {
     }
 
     /// Takes a message and forms commands to send to specified targets
-    pub(super) fn send_node_msg_to_targets(
+    pub(super) async fn send_node_msg_to_targets(
         &self,
         msg: NodeMsg,
         targets: BTreeSet<XorName>,
@@ -537,7 +571,7 @@ impl Core {
         // we create a dummy/random dst location,
         // we will set it correctly for each msg and target
         // let name = network.our_name().await;
-        let section_pk = *self.section_chain().last_key();
+        let section_pk = *self.section_chain().await.last_key();
 
         let dummy_dst_location = DstLocation::Node {
             name: our_name,
@@ -549,11 +583,10 @@ impl Core {
             let src = our_name;
 
             WireMsg::for_dst_accumulation(
-                self.key_share().map_err(|err| err)?,
+                self.key_share().await.map_err(|err| err)?,
                 src,
                 dummy_dst_location,
                 msg,
-                section_pk,
             )
         } else {
             WireMsg::single_src(self.node(), dummy_dst_location, msg, section_pk)
@@ -566,7 +599,7 @@ impl Core {
         for target in targets {
             debug!("sending {:?} to {:?}", wire_msg, target);
             let mut wire_msg = wire_msg.clone();
-            let dst_section_pk = self.section_key_by_name(&target);
+            let dst_section_pk = self.section_key_by_name(&target).await;
             wire_msg.set_dst_section_pk(dst_section_pk);
             wire_msg.set_dst_xorname(target);
 

@@ -7,6 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::node::{KeyedSig, SigShare};
+use crate::routing::Signer;
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -142,12 +143,17 @@ impl State {
         }
 
         if self.shares.len() > sig_share.public_key_set.threshold() {
+            let sigs: Vec<_> = self
+                .shares
+                .iter()
+                .map(|entry| {
+                    let (index, share) = entry.pair();
+                    (*index, share.clone())
+                })
+                .collect();
             let signature = sig_share
                 .public_key_set
-                .combine_signatures(self.shares.iter().map(|entry| {
-                    // let (index, share) =
-                    entry.pair()
-                }))
+                .combine_signatures(sigs.iter().map(|(i, s)| (*i, s)))
                 .map_err(Error::Combine)?;
             self.shares.clear();
 
@@ -170,7 +176,7 @@ mod tests {
         let threshold = 3;
         let sk_set = bls::SecretKeySet::random(threshold, &mut rng);
 
-        let mut aggregator = SignatureAggregator::default();
+        let aggregator = SignatureAggregator::default();
         let payload = b"hello";
 
         // Not enough shares yet
@@ -207,7 +213,7 @@ mod tests {
         let threshold = 3;
         let sk_set = bls::SecretKeySet::random(threshold, &mut rng);
 
-        let mut aggregator = SignatureAggregator::new();
+        let aggregator = SignatureAggregator::new();
         let payload = b"good";
 
         // First insert less than threshold + 1 valid shares.
@@ -238,7 +244,7 @@ mod tests {
         let threshold = 3;
         let sk_set = bls::SecretKeySet::random(threshold, &mut rng);
 
-        let mut aggregator = SignatureAggregator::with_expiration(Duration::from_millis(500));
+        let aggregator = SignatureAggregator::with_expiration(Duration::from_millis(500));
         let payload = b"hello";
 
         for index in 0..threshold {
@@ -264,7 +270,7 @@ mod tests {
         let threshold = 3;
         let sk_set = bls::SecretKeySet::random(threshold, &mut rng);
 
-        let mut aggregator = SignatureAggregator::new();
+        let aggregator = SignatureAggregator::new();
 
         let payload = b"hello";
 
@@ -293,6 +299,21 @@ mod tests {
 
     fn create_sig_share(sk_set: &bls::SecretKeySet, index: usize, payload: &[u8]) -> SigShare {
         let sk_share = sk_set.secret_key_share(index);
-        SigShare::new(sk_set.public_keys(), index, &sk_share, payload)
+        SigShare::new(
+            sk_set.public_keys(),
+            index,
+            TestSigner { sk_share },
+            payload,
+        )
     }
+}
+
+impl Signer for TestSigner {
+    fn sign<M: AsRef<[u8]>>(self, msg: M) -> bls::SignatureShare {
+        self.sk_share.sign(msg)
+    }
+}
+
+struct TestSigner {
+    sk_share: bls_dkg::SecretKeyShare,
 }

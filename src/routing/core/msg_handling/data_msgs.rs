@@ -21,7 +21,7 @@ use crate::messaging::{
 use crate::routing::core::capacity::CHUNK_COPY_COUNT;
 use crate::routing::peer::PeerUtils;
 use crate::routing::{
-    error::Result, messages::WireMsgUtils, routing_api::command::Command, section::SectionUtils,
+    error::Result, messages::WireMsgUtils, routing_api::command::Command, section::SectionLogic,
     SectionAuthorityProviderUtils,
 };
 // use bls::PublicKey;
@@ -123,10 +123,14 @@ impl Core {
     }
 
     /// Sign and serialize node message to be sent
-    pub(crate) fn prepare_node_msg(&self, msg: NodeMsg, dst: DstLocation) -> Result<Vec<Command>> {
+    pub(crate) async fn prepare_node_msg(
+        &self,
+        msg: NodeMsg,
+        dst: DstLocation,
+    ) -> Result<Vec<Command>> {
         let msg_id = MessageId::new();
 
-        let section_pk = *self.section().chain().last_key();
+        let section_pk = self.section().last_key().await;
 
         let payload = WireMsg::serialize_msg_payload(&msg)?;
 
@@ -151,7 +155,7 @@ impl Core {
         trace!("Handling chunk read at adult");
         let mut commands = vec![];
         if self.chunk_storage.is_storage_getting_full().await {
-            let section_pk = self.public_key_set()?.public_key();
+            let section_pk = self.public_key_set().await?.public_key();
             let node_id = self.node().keypair.public;
 
             let node_xorname = XorName::from(PublicKey::from(node_id));
@@ -179,7 +183,7 @@ impl Core {
                 };
 
                 // Setup node authority on this response and send this back to our elders
-                let section_pk = *self.section().chain().last_key();
+                let section_pk = self.section().last_key().await;
                 let dst = DstLocation::Section {
                     name: query.dst_name(),
                     section_pk,
@@ -319,7 +323,7 @@ impl Core {
         let adults = self
             .section()
             .adults()
-            .copied()
+            .await
             .map(|p2p_node| *p2p_node.name());
 
         adults
@@ -343,7 +347,7 @@ impl Core {
         trace!("Service msg being handled");
         let is_in_destination = match dst_location.name() {
             Some(dst_name) => {
-                let is_in_destination = self.section().prefix().matches(&dst_name);
+                let is_in_destination = self.section().prefix().await.matches(&dst_name);
                 if is_in_destination {
                     if let DstLocation::EndUser(EndUser { socket_id, xorname }) = dst_location {
                         if let Some(addr) = self.get_socket_addr(socket_id) {
@@ -384,7 +388,7 @@ impl Core {
 
                 // TODO: remove the enduser registry and simply encrypt socket
                 // addr with this node's keypair and use that as the socket id
-                match self.try_add_enduser(sender) {
+                match self.try_add_enduser(sender).await {
                     Ok(end_user) => end_user,
                     Err(err) => {
                         error!(
@@ -419,7 +423,7 @@ impl Core {
                 &self.node,
                 dst_location,
                 node_msg,
-                self.section.authority_provider().section_key(),
+                self.section.authority_provider().await.section_key(),
             ) {
                 Ok(mut wire_msg) => {
                     wire_msg.set_msg_id(msg_id);

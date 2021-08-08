@@ -91,7 +91,7 @@ impl MessageFilter {
     }
 
     // Resets both incoming and outgoing filters.
-    pub(crate) async fn reset(&mut self) {
+    pub(crate) async fn reset(&self) {
         self.incoming.clear().await;
         self.outgoing.clear().await;
     }
