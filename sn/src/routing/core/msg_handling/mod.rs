@@ -17,9 +17,9 @@ mod service_msgs;
 mod update_section;
 
 use super::Core;
-use crate::dbs::Error as DatabaseError;
 use crate::peer::{Peer, UnnamedPeer};
 use crate::routing::{
+    core::ChunkStoreError,
     log_markers::LogMarker,
     messages::{NodeMsgAuthorityUtils, WireMsgUtils},
     network_knowledge::{NetworkKnowledge, SectionPeers},
@@ -684,8 +684,8 @@ impl Core {
                         error!("Error storing chunk: {:?}", error);
                         let mut commands = vec![];
 
-                        // if the error was DbFull
-                        if matches!(error, DatabaseError::NotEnoughSpace) {
+                        // if the error was Disk Full
+                        if matches!(error, ChunkStoreError::NotEnoughSpace) {
                             warn!("Db errored as full. Informing elders");
                             let level = StorageLevel::from(10)?;
                             commands.extend(self.record_if_any(Some(level)).await);
