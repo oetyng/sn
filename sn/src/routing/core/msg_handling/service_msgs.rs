@@ -171,7 +171,7 @@ impl Core {
         let mut commands = vec![];
 
         let msg = SystemMsg::NodeQueryResponse {
-            response: self.chunk_storage.get(address),
+            response: self.chunk_storage.get(address).await,
             correlation_id: msg_id,
             user,
         };
