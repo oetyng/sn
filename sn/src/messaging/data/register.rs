@@ -9,6 +9,7 @@
 use super::{CmdError, Error, QueryResponse, Result};
 
 use crate::messaging::{data::OperationId, SectionAuth};
+use crate::types::convert_dt_error_to_error_message;
 use crate::types::crdts::{EntryHash, Register};
 use crate::types::{
     crdts::{Entry, Policy, RegisterOp, User},
@@ -132,11 +133,11 @@ pub enum CreateRegister {
 
 impl CreateRegister {
     ///
-    pub fn owner(&self) -> User {
+    pub fn owner(&self) -> Result<User> {
         use CreateRegister::*;
         match self {
-            Populated(reg) => reg.owner(),
-            Empty { policy, .. } => *policy.owner(),
+            Populated(reg) => reg.owner().map_err(convert_dt_error_to_error_message),
+            Empty { policy, .. } => Ok(*policy.owner()),
         }
     }
 
@@ -408,7 +409,7 @@ impl RegisterCmd {
             Self::Create {
                 cmd: SignedRegisterCreate { op, .. },
                 ..
-            } => Some(op.owner()),
+            } => op.owner().ok(),
             _ => None,
         }
     }

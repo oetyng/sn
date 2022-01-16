@@ -7,21 +7,20 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-use serde::{Deserialize, Serialize};
-
 use super::{reg_crdt::RegisterCrdt, Entry, EntryHash, MultimapKeyValue, MultimapKeyValues, User};
 use crate::types::{Error, RegisterAddress as Address, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 const MULTIMAP_REMOVED_MARK: &[u8] = b"";
 
 ///
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Debug)]
-pub(super) struct MapCrdt {
+pub(super) struct MultimapCrdt {
     register: RegisterCrdt,
 }
 
-impl MapCrdt {
+impl MultimapCrdt {
     /// Create a Multimap
     pub(super) fn new(address: Address) -> Self {
         Self {
@@ -142,7 +141,7 @@ mod tests {
         let name = XorName::random();
         let tag = 25_000;
 
-        let map = MapCrdt::new(Address::Public { name, tag });
+        let map = MultimapCrdt::new(Address::Public { name, tag });
 
         let key = b"".to_vec();
         let received_data = map.get_by_key(&key)?;
@@ -165,7 +164,7 @@ mod tests {
         let tag = 25_000;
         let requester = User::Anyone;
 
-        let mut map = MapCrdt::new(Address::Public { name, tag });
+        let mut map = MultimapCrdt::new(Address::Public { name, tag });
 
         let _ = map.get_by_key(&key)?;
 
@@ -199,7 +198,7 @@ mod tests {
         let tag = 25_000;
         let requester = User::Anyone;
 
-        let mut map = MapCrdt::new(Address::Public { name, tag });
+        let mut map = MultimapCrdt::new(Address::Public { name, tag });
 
         let hash = map.insert(key_val.clone(), BTreeSet::new(), requester)?;
         let hash2 = map.insert(key_val2.clone(), BTreeSet::new(), requester)?;
@@ -225,7 +224,7 @@ mod tests {
         let tag = 25_000;
         let requester = User::Anyone;
 
-        let mut map = MapCrdt::new(Address::Public { name, tag });
+        let mut map = MultimapCrdt::new(Address::Public { name, tag });
 
         let hash = map.insert(key_val, BTreeSet::new(), requester)?;
 

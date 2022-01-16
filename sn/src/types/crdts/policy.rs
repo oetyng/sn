@@ -7,8 +7,10 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-use super::super::{Error, PublicKey, Result};
-use super::Action;
+use super::{
+    super::{Error, PublicKey, Result},
+    Action,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, hash::Hash};
 
@@ -66,6 +68,17 @@ pub enum Permissions {
     Public(PublicPermissions),
     /// Private permissions set.
     Private(PrivatePermissions),
+}
+
+impl Permissions {
+    /// Returns `Ok(())` if `action` is allowed for the provided user and `Err(AccessDenied)` if
+    /// this action is not permitted.
+    pub fn is_allowed(&self, action: Action) -> Option<bool> {
+        match self {
+            Self::Public(perms) => perms.is_allowed(action),
+            Self::Private(perms) => Some(perms.is_allowed(action)),
+        }
+    }
 }
 
 impl From<PrivatePermissions> for Permissions {
@@ -188,6 +201,11 @@ impl PublicPolicy {
             .and_then(|perms| perms.is_allowed(action))
     }
 
+    /// Gets alll the permissions
+    pub fn permissions_list(&self) -> &BTreeMap<User, PublicPermissions> {
+        &self.permissions
+    }
+
     /// Gets the permissions for a user if applicable.
     pub fn permissions(&self, user: User) -> Option<Permissions> {
         if user == self.owner {
@@ -235,6 +253,11 @@ impl PrivatePolicy {
                 None => Err(Error::AccessDenied(requester)),
             }
         }
+    }
+
+    /// Gets alll the permissions
+    pub fn permissions_list(&self) -> &BTreeMap<User, PrivatePermissions> {
+        &self.permissions
     }
 
     /// Gets the permissions for a user if applicable.

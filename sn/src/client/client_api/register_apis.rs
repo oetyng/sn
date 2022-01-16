@@ -132,7 +132,7 @@ impl Client {
         let mut register = self.get_register(address).await?;
 
         // We can now write the entry to the Register
-        let (hash, op) = register.write(entry, children)?;
+        let (hash, op) = register.write(entry, children, User::Key(self.public_key()))?;
         let op = EditRegister { address, edit: op };
 
         let signature = self.keypair.sign(&bincode::serialize(&op)?);
@@ -344,14 +344,14 @@ mod tests {
         assert_eq!(*priv_register.name(), name);
         assert_eq!(priv_register.tag(), tag);
         assert_eq!(priv_register.size(), 0);
-        assert_eq!(priv_register.owner(), owner);
+        assert_eq!(priv_register.owner()?, owner);
 
         let pub_register = client.get_register(address2).await?;
         assert!(pub_register.is_public());
         assert_eq!(*pub_register.name(), name);
         assert_eq!(pub_register.tag(), tag);
         assert_eq!(pub_register.size(), 0);
-        assert_eq!(pub_register.owner(), owner);
+        assert_eq!(pub_register.owner()?, owner);
 
         Ok(())
     }
@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(*register.name(), name);
         assert_eq!(register.tag(), tag);
         assert_eq!(register.size(), 0);
-        assert_eq!(register.owner(), owner);
+        assert_eq!(register.owner()?, owner);
 
         // store a Public Register
         let (address, batch) = client
@@ -481,7 +481,7 @@ mod tests {
         assert_eq!(*register.name(), name);
         assert_eq!(register.tag(), tag);
         assert_eq!(register.size(), 0);
-        assert_eq!(register.owner(), owner);
+        assert_eq!(register.owner()?, owner);
 
         Ok(())
     }

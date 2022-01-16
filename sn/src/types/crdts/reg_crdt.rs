@@ -8,9 +8,7 @@
 // Software.
 
 use super::{
-    super::{
-        RegisterAddress as Address, {Error, Result},
-    },
+    super::{Error, RegisterAddress as Address, Result},
     CrdtOperation, Entry, EntryHash, User,
 };
 use crdts::{merkle_reg::MerkleReg, CmRDT};

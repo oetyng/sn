@@ -8,8 +8,8 @@
 // Software.
 
 use super::{
-    Action, EntryHash, Error, MapCrdt, MultimapKeyValue, MultimapKeyValues, Permissions, Policy,
-    Result, User,
+    Action, EntryHash, Error, MultimapCrdt, MultimapKeyValue, MultimapKeyValues, Permissions,
+    Policy, Result, User,
 };
 use crate::{types::RegisterAddress as Address, types::Scope};
 
@@ -20,7 +20,7 @@ use xor_name::XorName;
 /// Object storing the Multimap
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Debug)]
 pub struct Multimap {
-    crdt: MapCrdt,
+    crdt: MultimapCrdt,
     policy: Policy,
     cap: u16,
 }
@@ -34,7 +34,7 @@ impl Multimap {
             Address::Private { name, tag }
         };
         Self {
-            crdt: MapCrdt::new(address),
+            crdt: MultimapCrdt::new(address),
             policy,
             cap,
         }

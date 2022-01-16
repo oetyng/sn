@@ -357,7 +357,7 @@ impl RegisterStorage {
                     .state
                     .read()
                     .await
-                    .check_permissions(Action::Write, Some(User::Key(public_key)))?;
+                    .check_permissions(Action::Write, User::Key(public_key))?;
                 let result = entry
                     .state
                     .write()
@@ -396,7 +396,7 @@ impl RegisterStorage {
                         let read_only = entry.state.read().await;
                         // TODO - Register::check_permission() doesn't support Delete yet in safe-nd
                         // register.check_permission(action, Some(public_key))?;
-                        if User::Key(public_key) != read_only.owner() {
+                        if User::Key(public_key) != read_only.owner()? {
                             Err(Error::InvalidOwner(public_key))
                         } else {
                             info!("Deleting Register");
@@ -487,7 +487,7 @@ impl RegisterStorage {
 
         let read_only = entry.state.read().await;
         read_only
-            .check_permissions(action, Some(requester))
+            .check_permissions(action, requester)
             .map_err(Error::from)?;
 
         Ok(read_only.clone())
@@ -528,8 +528,12 @@ impl RegisterStorage {
         requester: User,
         operation_id: OperationId,
     ) -> NodeQueryResponse {
-        let result = match self.get_register(&address, Action::Read, requester).await {
-            Ok(res) => Ok(res.owner()),
+        let result = match self
+            .get_register(&address, Action::Read, requester)
+            .await
+            .and_then(|register| register.owner().map_err(Error::from))
+        {
+            Ok(owner) => Ok(owner),
             Err(error) => Err(convert_to_error_message(error)),
         };
 
@@ -583,7 +587,7 @@ impl RegisterStorage {
         let result = match self
             .get_register(&address, Action::Read, requester_pk)
             .await
-            .map(|register| register.policy().clone())
+            .and_then(|register| register.policy().map_err(Error::from))
         {
             Ok(res) => Ok(res),
             Err(error) => Err(convert_to_error_message(error)),
@@ -647,7 +651,7 @@ impl RegisterStorage {
                             tag,
                             size,
                             policy,
-                        } => Some((Register::new(name, tag, policy, size), section_auth)),
+                        } => Some((Register::new(name, tag, policy, size)?, section_auth)),
                         CreateRegister::Populated(instance) => {
                             if instance.size() > (u16::MAX as u64) {
                                 // this would mean the instance has been modified on disk outside of the software
@@ -788,7 +792,7 @@ mod test {
         match res {
             NodeQueryResponse::GetRegister((Ok(reg), _)) => {
                 assert_eq!(reg.address(), &address, "Should have same address!");
-                assert_eq!(reg.owner(), authority, "Should have same owner!");
+                assert_eq!(reg.owner()?, authority, "Should have same owner!");
             }
             e => panic!("Could not read! {:?}", e),
         }
@@ -879,7 +883,7 @@ mod test {
         match res {
             NodeQueryResponse::GetRegister((Ok(reg), _)) => {
                 assert_eq!(reg.address(), &address, "Should have same address!");
-                assert_eq!(reg.owner(), authority, "Should have same owner!");
+                assert_eq!(reg.owner()?, authority, "Should have same owner!");
             }
             e => panic!("Could not read! {:?}", e),
         }

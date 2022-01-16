@@ -23,7 +23,7 @@ use super::{Error, Result, Signature};
 use crate::types::RegisterAddress as Address;
 
 use crdts::merkle_reg::Node;
-use map_crdt::MapCrdt;
+use map_crdt::MultimapCrdt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
@@ -40,7 +40,8 @@ pub type MultimapKeyValue = (MultimapKey, MultimapValue);
 ///
 pub type MultimapKeyValues = BTreeSet<(EntryHash, MultimapKeyValue)>;
 
-/// Arbitrary maximum size of a register entry.
+/// Pseudo-arbitrary maximum size of a register entry.
+/// (there are considerations taken)
 pub const MAX_REG_ENTRY_SIZE: usize = 1024;
 
 /// Register mutation operation to apply to Register.

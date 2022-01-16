@@ -7,12 +7,15 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-use super::{crdts::User, RegisterAddress};
+use super::{
+    crdts::{EntryHash, User},
+    RegisterAddress,
+};
 
 use crate::messaging::data::Error as ErrorMessage;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Formatter},
     result,
 };
@@ -66,6 +69,9 @@ pub enum Error {
     /// Entry could not be found on the data
     #[error("Requested entry not found")]
     NoSuchEntry,
+    /// The value has forked and needs merging.
+    #[error("The value has forked and needs merging")]
+    ForkedValue(BTreeSet<EntryHash>),
     /// Key does not exist
     #[error("Key does not exist")]
     NoSuchKey,
