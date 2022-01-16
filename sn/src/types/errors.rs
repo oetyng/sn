@@ -7,7 +7,7 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-use super::{register::User, RegisterAddress};
+use super::{crdts::User, RegisterAddress};
 
 use crate::messaging::data::Error as ErrorMessage;
 

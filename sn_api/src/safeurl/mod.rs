@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under the MIT license <LICENSE-MIT
 // http://opensource.org/licenses/MIT> or the Modified BSD license <LICENSE-BSD
@@ -1208,7 +1208,7 @@ mod tests {
     use super::*;
     use color_eyre::{eyre::bail, eyre::eyre, Result};
     use rand::Rng;
-    use safe_network::types::{register::EntryHash, BytesAddress};
+    use safe_network::types::{crdts::EntryHash, BytesAddress};
 
     macro_rules! verify_expected_result {
             ($result:expr, $pattern:pat $(if $cond:expr)?) => {

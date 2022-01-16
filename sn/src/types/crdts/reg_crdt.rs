@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under the MIT license <LICENSE-MIT
 // https://opensource.org/licenses/MIT> or the Modified BSD license <LICENSE-BSD
@@ -7,58 +7,21 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-use super::metadata::Entry;
 use super::{
     super::{
-        RegisterAddress as Address, Signature, {Error, Result},
+        RegisterAddress as Address, {Error, Result},
     },
-    User,
+    CrdtOperation, Entry, EntryHash, User,
 };
-use crdts::{
-    merkle_reg::{MerkleReg, Node},
-    CmRDT,
-};
+use crdts::{merkle_reg::MerkleReg, CmRDT};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    fmt::{self, Debug, Display, Formatter, Result as FmtResult},
+    fmt::{self, Debug, Display, Formatter},
     hash::Hash,
 };
 
-/// Hash of the register entry. Logging as the same format of XorName.
-#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct EntryHash(pub crdts::merkle_reg::Hash);
-
-impl Debug for EntryHash {
-    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        write!(formatter, "{}", self)
-    }
-}
-
-impl Display for EntryHash {
-    fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        write!(
-            formatter,
-            "{:02x}{:02x}{:02x}..",
-            self.0[0], self.0[1], self.0[2]
-        )
-    }
-}
-
-/// CRDT Data operation applicable to other Register replica.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CrdtOperation<T> {
-    /// Address of a Register object on the network.
-    pub address: Address,
-    /// The data operation to apply.
-    pub crdt_op: Node<T>,
-    /// The PublicKey of the entity that generated the operation
-    pub source: User,
-    /// The signature of source on the crdt_top, required to apply the op
-    pub signature: Option<Signature>,
-}
-
-/// Register data type as a CRDT with Access Control
+/// Register data type as a CRDT without Access Control
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd)]
 pub(super) struct RegisterCrdt {
     /// Address on the network of this piece of data

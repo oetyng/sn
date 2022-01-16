@@ -14,7 +14,7 @@ use crate::messaging::data::{
     RegisterQuery, SignedRegisterCreate, SignedRegisterDelete, SignedRegisterEdit,
 };
 use crate::types::{
-    register::{Entry, EntryHash, Permissions, Policy, Register, User},
+    crdts::{Entry, EntryHash, Permissions, Policy, Register, User},
     RegisterAddress as Address,
 };
 
@@ -284,11 +284,11 @@ mod tests {
     use crate::messaging::data::Error as ErrorMessage;
     use crate::retry_loop_for_pattern;
     use crate::types::{
-        log_markers::LogMarker,
-        register::{
+        crdts::{
             Action, EntryHash, Permissions, Policy, PrivatePolicy, PublicPermissions, PublicPolicy,
             User,
         },
+        log_markers::LogMarker,
     };
     use eyre::{bail, eyre, Result};
     use rand::Rng;

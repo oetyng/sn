@@ -1,4 +1,4 @@
-// Copyright 2020 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under the MIT license <LICENSE-MIT
 // http://opensource.org/licenses/MIT> or the Modified BSD license <LICENSE-BSD
@@ -13,9 +13,9 @@ use bytes::Bytes;
 use hex::encode;
 use log::{debug, info};
 use safe_network::client::{Client, ClientConfig, Error as ClientError, RegisterWriteAheadLog};
-use safe_network::types::register::{Policy, PrivatePolicy, PublicPolicy};
+use safe_network::types::crdts::{Policy, PrivatePolicy, PublicPolicy};
 use safe_network::types::{
-    register::{Entry, EntryHash, PrivatePermissions, PublicPermissions, User},
+    crdts::{Entry, EntryHash, PrivatePermissions, PublicPermissions, User},
     BytesAddress, Error as SafeNdError, Keypair, RegisterAddress, Scope,
 };
 use std::{

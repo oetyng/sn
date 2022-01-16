@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under the MIT license <LICENSE-MIT
 // https://opensource.org/licenses/MIT> or the Modified BSD license <LICENSE-BSD
@@ -9,10 +9,11 @@
 
 //! SAFE network data types.
 
+/// Register data type
+pub mod crdts;
 /// Standardised log markers for various events
 pub mod log_markers;
-/// Register data type
-pub mod register;
+
 /// Encoding utils
 pub mod utils;
 

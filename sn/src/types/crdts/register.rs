@@ -7,32 +7,18 @@
 // specific language governing permissions and limitations relating to use of the SAFE Network
 // Software.
 
-mod metadata;
-mod policy;
-mod reg_crdt;
-
-pub use metadata::{Action, Entry};
-pub use policy::{
-    Permissions, Policy, PrivatePermissions, PrivatePolicy, PublicPermissions, PublicPolicy, User,
+use super::{
+    reg_crdt::RegisterCrdt, Action, Entry, EntryHash, Error, Permissions, Policy, PrivatePolicy,
+    PublicPolicy, RegisterOp, Result, User, MAX_REG_ENTRY_SIZE,
 };
-pub use reg_crdt::EntryHash;
-
-use super::{Error, Result};
 use crate::{types::RegisterAddress as Address, types::Scope};
-use reg_crdt::{CrdtOperation, RegisterCrdt};
-use self_encryption::MIN_ENCRYPTABLE_BYTES;
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     hash::Hash,
 };
 use xor_name::XorName;
-
-/// Arbitrary maximum size of a register entry.
-const MAX_REG_ENTRY_SIZE: usize = MIN_ENCRYPTABLE_BYTES / 3; // 1024 bytes
-
-/// Register mutation operation to apply to Register.
-pub type RegisterOp<T> = CrdtOperation<T>;
 
 /// Object storing the Register
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Debug)]
@@ -227,14 +213,14 @@ impl Register {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        register::{
-            Entry, EntryHash, Permissions, PrivatePermissions, PrivatePolicy, PublicPermissions,
-            PublicPolicy, Register, RegisterOp, User,
+    use super::*;
+    use crate::{
+        types::RegisterAddress as Address,
+        types::{
+            crdts::{PrivatePermissions, PublicPermissions},
+            utils, Keypair, Scope,
         },
-        utils, Error, Keypair, Result,
     };
-    use crate::{types::RegisterAddress as Address, types::Scope};
     use proptest::prelude::*;
     use rand::{rngs::OsRng, seq::SliceRandom, thread_rng};
     use std::{

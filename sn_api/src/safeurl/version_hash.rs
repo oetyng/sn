@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under the MIT license <LICENSE-MIT
 // http://opensource.org/licenses/MIT> or the Modified BSD license <LICENSE-BSD
@@ -8,7 +8,7 @@
 // Software.
 
 use multibase::Base;
-use safe_network::types::register::EntryHash;
+use safe_network::types::crdts::EntryHash;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::{

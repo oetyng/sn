@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under The General Public License (GPL), version 3.
 // Unless required by applicable law or agreed to in writing, the SAFE Network Software distributed
@@ -18,7 +18,7 @@ use crate::node::{
     routing::{api::command::Command, core::Core},
 };
 use crate::peer::Peer;
-use crate::types::{log_markers::LogMarker, register::User, PublicKey, ReplicatedData};
+use crate::types::{crdts::User, log_markers::LogMarker, PublicKey, ReplicatedData};
 
 use itertools::Itertools;
 use std::{cmp::Ordering, collections::BTreeSet};

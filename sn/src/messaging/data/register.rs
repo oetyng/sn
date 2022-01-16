@@ -1,4 +1,4 @@
-// Copyright 2021 MaidSafe.net limited.
+// Copyright 2022 MaidSafe.net limited.
 //
 // This SAFE Network Software is licensed to you under The General Public License (GPL), version 3.
 // Unless required by applicable law or agreed to in writing, the SAFE Network Software distributed
@@ -9,9 +9,9 @@
 use super::{CmdError, Error, QueryResponse, Result};
 
 use crate::messaging::{data::OperationId, SectionAuth};
-use crate::types::register::{EntryHash, Register};
+use crate::types::crdts::{EntryHash, Register};
 use crate::types::{
-    register::{Entry, Policy, RegisterOp, User},
+    crdts::{Entry, Policy, RegisterOp, User},
     RegisterAddress as Address,
 };
 
@@ -76,6 +76,7 @@ pub enum RegisterQuery {
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub enum RegisterCmd {
     /// Create a new [`Register`] on the network.
+    /// This requires payment.
     Create {
         /// The user signed op.
         cmd: SignedRegisterCreate,
@@ -83,11 +84,14 @@ pub enum RegisterCmd {
         /// verifying that it was paid for.
         section_auth: SectionAuth,
     },
-    /// Edit the [`Register`].
+    /// Edit the [`Register`] entries.
     Edit(SignedRegisterEdit),
     /// Delete the [`Register`].
     Delete(SignedRegisterDelete),
+    // /// Edit the [`Register`] permissions.
+    // EditPermissions(),
     /// Extend the size of the [`Register`].
+    /// This requires payment.
     Extend {
         /// The user signed op.
         cmd: SignedRegisterExtend,
@@ -95,6 +99,16 @@ pub enum RegisterCmd {
         /// verifying that it was paid for.
         section_auth: SectionAuth,
     },
+    // /// Clear the contents of the [`Register`].
+    // /// This requires payment, equal to the size of the register,
+    // /// since it will make the equivalent budget available for use again.
+    // Clear {
+    //     /// The user signed op.
+    //     cmd: SignedRegisterExtend,
+    //     /// Section signature over the operation,
+    //     /// verifying that it was paid for.
+    //     section_auth: SectionAuth,
+    // },
 }
 
 ///
@@ -181,6 +195,15 @@ pub struct EditRegister {
     pub edit: RegisterOp<Entry>,
 }
 
+// ///
+// #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+// pub struct EditRegisterPermissions {
+//     /// The address of the [`Register`] to edit.
+//     pub address: Address,
+//     /// The operations to perform.
+//     pub edit: RegisterOp<Entry>,
+// }
+
 /// A signed cmd to create a [`Register`].
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct SignedRegisterCreate {
@@ -227,6 +250,17 @@ pub struct SignedRegisterDelete {
     /// This will be verified against the register's owner and permissions.
     pub auth: crate::messaging::ServiceAuth,
 }
+
+// /// A [`Register`] write operation signed by the requester.
+// #[derive(Eq, PartialEq, Clone, Serialize, Deserialize, Debug)]
+// pub struct SignedRegisterPermissionsEdit {
+//     /// The operation to perform.
+//     pub op: EditRegisterPermissions,
+//     /// A signature carrying authority to perform the operation.
+//     ///
+//     /// This will be verified against the register's owner and permissions.
+//     pub auth: crate::messaging::ServiceAuth,
+// }
 
 impl SignedRegisterCreate {
     /// Returns the dst address of the register.

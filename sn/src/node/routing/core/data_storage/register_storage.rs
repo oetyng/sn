@@ -19,7 +19,7 @@ use crate::messaging::{
     SectionAuth, VerifyAuthority,
 };
 use crate::types::{
-    register::{Action, EntryHash, Register, User},
+    crdts::{Action, EntryHash, Register, User},
     DataAddress, RegisterAddress as Address,
 };
 
@@ -712,9 +712,9 @@ mod test {
 
     use crate::messaging::SectionAuth;
     use crate::node::{Error, Result};
-    use crate::types::register::{EntryHash, PrivatePolicy};
+    use crate::types::crdts::{EntryHash, PrivatePolicy};
     use crate::types::DataAddress;
-    use crate::types::{register::User, Keypair};
+    use crate::types::{crdts::User, Keypair};
     use crate::UsedSpace;
     use crate::{
         messaging::{
@@ -722,7 +722,7 @@ mod test {
             system::NodeQueryResponse,
             ServiceAuth,
         },
-        types::register::{Policy, PublicPolicy},
+        types::crdts::{Policy, PublicPolicy},
     };
 
     use rand::rngs::OsRng;
