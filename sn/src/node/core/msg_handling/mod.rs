@@ -658,7 +658,7 @@ impl Core {
                 }
                 Ok(vec![])
             }
-            SystemMsg::NodeCmd(NodeCmd::ReceiveMetadata { metadata }) => {
+            SystemMsg::NodeCmd(NodeCmd::ReceiveMetadata(metadata)) => {
                 info!("Processing received MetadataExchange packet: {:?}", msg_id);
                 self.set_adult_levels(metadata).await;
                 Ok(vec![])
@@ -759,16 +759,6 @@ impl Core {
                             sender_xorname,
                         )
                         .await
-                    }
-                    _ => {
-                        self.send_event(Event::MessageReceived {
-                            msg_id,
-                            src: msg_authority.src_location(),
-                            dst: dst_location,
-                            msg: Box::new(MessageReceived::NodeQuery(node_query)),
-                        })
-                        .await;
-                        Ok(vec![])
                     }
                 }
             }

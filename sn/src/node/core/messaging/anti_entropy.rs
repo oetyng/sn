@@ -84,7 +84,7 @@ impl Core {
         section_pk: BlsPublicKey,
     ) -> Result<Vec<Cmd>> {
         let metadata = self.get_metadata_of(prefix).await;
-        let data_update_msg = SystemMsg::NodeCmd(NodeCmd::ReceiveMetadata { metadata });
+        let data_update_msg = SystemMsg::NodeCmd(NodeCmd::ReceiveMetadata(metadata));
 
         match self
             .send_direct_msg_to_nodes(

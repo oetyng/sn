@@ -47,10 +47,7 @@ pub enum NodeCmd {
     ReplicateData(ReplicatedData),
     /// Sent to all promoted nodes (also sibling if any) after
     /// a completed transition to a new constellation.
-    ReceiveMetadata {
-        /// Metadata
-        metadata: MetadataExchange,
-    },
+    ReceiveMetadata(MetadataExchange),
 }
 
 /// Event message sent among nodes
@@ -72,15 +69,6 @@ pub enum NodeEvent {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeQuery {
-    /// Metadata is handled by Elders
-    Metadata {
-        /// The actual query message
-        query: DataQuery,
-        /// Client signature
-        auth: ServiceAuth,
-        /// The user that has initiated this query
-        origin: EndUser,
-    },
     /// Data is handled by Adults
     Data {
         /// The query
