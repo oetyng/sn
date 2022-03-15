@@ -119,7 +119,7 @@ impl Node {
             return Ok(vec![]);
         }
 
-        let msg = SystemMsg::NodeQuery(NodeQuery::Data {
+        let msg = SystemMsg::NodeQuery(NodeQuery::DataService {
             query,
             auth: auth.into_inner(),
             origin: EndUser(origin.name()),

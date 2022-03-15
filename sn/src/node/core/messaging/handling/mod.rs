@@ -23,8 +23,8 @@ use crate::messaging::{
     data::{ServiceMsg, StorageLevel},
     signature_aggregator::Error as AggregatorError,
     system::{
-        JoinRequest, JoinResponse, NodeCmd, NodeEvent, NodeQuery, SectionAuth as SystemSectionAuth,
-        SystemMsg,
+        JoinRequest, JoinResponse, NodeCmd, NodeEvent, NodeQuery, NodeSystemQuery,
+        SectionAuth as SystemSectionAuth, SystemMsg,
     },
     AuthorityProof, DstLocation, MsgId, MsgType, NodeMsgAuthority, SectionAuth, WireMsg,
 };
@@ -33,7 +33,7 @@ use crate::node::{
     core::{DkgSessionInfo, Node, DATA_QUERY_LIMIT},
     messages::{NodeMsgAuthorityUtils, WireMsgUtils},
     network_knowledge::NetworkKnowledge,
-    Error, Event, MessageReceived, Result, MIN_LEVEL_WHEN_FULL,
+    Error, Event, Result, MIN_LEVEL_WHEN_FULL,
 };
 use crate::types::{log_markers::LogMarker, Peer, PublicKey};
 
@@ -41,11 +41,9 @@ use bls::PublicKey as BlsPublicKey;
 use bytes::Bytes;
 use itertools::Itertools;
 use std::collections::BTreeSet;
-use tokio::time::Duration;
 use xor_name::XorName;
 
 const REPLICATION_BATCH_SIZE: usize = 50;
-const REPLICATION_MSG_THROTTLE_DURATION: Duration = Duration::from_secs(5);
 
 // Message handling
 impl Node {
@@ -161,15 +159,7 @@ impl Node {
                 }
 
                 let handling_msg_cmds = self
-                    .handle_system_msg(
-                        sender,
-                        msg_id,
-                        msg_authority,
-                        dst_location,
-                        msg,
-                        payload,
-                        known_keys,
-                    )
+                    .handle_system_msg(sender, msg_id, msg_authority, msg, payload, known_keys)
                     .await?;
 
                 cmds.extend(handling_msg_cmds);
@@ -259,7 +249,6 @@ impl Node {
         sender: Peer,
         msg_id: MsgId,
         mut msg_authority: NodeMsgAuthority,
-        dst_location: DstLocation,
         msg: SystemMsg,
         payload: Bytes,
         known_keys: Vec<BlsPublicKey>,
@@ -272,7 +261,7 @@ impl Node {
             .await
         {
             Ok(false) => {
-                self.handle_valid_msg(msg_id, msg_authority, dst_location, msg, sender, known_keys)
+                self.handle_valid_msg(msg_id, msg_authority, msg, sender, known_keys)
                     .await
             }
             Err(Error::InvalidSignatureShare) => {
@@ -296,13 +285,13 @@ impl Node {
         &self,
         msg_id: MsgId,
         msg_authority: NodeMsgAuthority,
-        dst_location: DstLocation,
         node_msg: SystemMsg,
         sender: Peer,
         known_keys: Vec<BlsPublicKey>,
     ) -> Result<Vec<Cmd>> {
         let src_name = msg_authority.name();
         match node_msg {
+            // ------------- AntiEntropy ----------------------------
             SystemMsg::AntiEntropyUpdate {
                 section_auth,
                 section_signed,
@@ -317,57 +306,6 @@ impl Node {
                     members,
                 )
                 .await
-            }
-            SystemMsg::Relocate(node_state) => {
-                trace!("Handling msg: Relocate from {}: {:?}", sender, msg_id);
-                Ok(self
-                    .handle_relocate(node_state)
-                    .await?
-                    .into_iter()
-                    .collect())
-            }
-            SystemMsg::StartConnectivityTest(name) => {
-                trace!(
-                    "Handling msg: StartConnectivityTest from {}: {:?}",
-                    sender,
-                    msg_id
-                );
-                if self.is_not_elder().await {
-                    return Ok(vec![]);
-                }
-
-                Ok(vec![Cmd::TestConnectivity(name)])
-            }
-            SystemMsg::JoinAsRelocatedResponse(join_response) => {
-                trace!("Handling msg: JoinAsRelocatedResponse from {}", sender);
-                if let Some(ref mut joining_as_relocated) = *self.relocate_state.write().await {
-                    if let Some(cmd) = joining_as_relocated
-                        .handle_join_response(*join_response, sender.addr())
-                        .await?
-                    {
-                        return Ok(vec![cmd]);
-                    }
-                } else {
-                    error!(
-                        "No relocation in progress upon receiving {:?}",
-                        join_response
-                    );
-                }
-
-                Ok(vec![])
-            }
-            SystemMsg::NodeMsgError {
-                error,
-                correlation_id,
-            } => {
-                trace!(
-                    "From {:?}({:?}), received error {:?} correlated to {:?}",
-                    msg_authority.src_location(),
-                    msg_id,
-                    error,
-                    correlation_id
-                );
-                Ok(vec![])
             }
             SystemMsg::AntiEntropyRetry {
                 section_auth,
@@ -405,10 +343,43 @@ impl Node {
                 trace!("Received Probe message from {}: {:?}", sender, msg_id);
                 Ok(vec![])
             }
-            SystemMsg::BackPressure(load_report) => {
-                trace!("Handling msg: BackPressure from {}: {:?}", sender, msg_id);
-                // TODO: Factor in med/long term backpressure into general node liveness calculations
-                self.comm.regulate(sender.addr(), load_report).await;
+            // ------------- Join / Relocate ------------------------
+            SystemMsg::Relocate(node_state) => {
+                trace!("Handling msg: Relocate from {}: {:?}", sender, msg_id);
+                Ok(self
+                    .handle_relocate(node_state)
+                    .await?
+                    .into_iter()
+                    .collect())
+            }
+            SystemMsg::StartConnectivityTest(name) => {
+                trace!(
+                    "Handling msg: StartConnectivityTest from {}: {:?}",
+                    sender,
+                    msg_id
+                );
+                if self.is_not_elder().await {
+                    return Ok(vec![]);
+                }
+
+                Ok(vec![Cmd::TestConnectivity(name)])
+            }
+            SystemMsg::JoinAsRelocatedResponse(join_response) => {
+                trace!("Handling msg: JoinAsRelocatedResponse from {}", sender);
+                if let Some(ref mut joining_as_relocated) = *self.relocate_state.write().await {
+                    if let Some(cmd) = joining_as_relocated
+                        .handle_join_response(*join_response, sender.addr())
+                        .await?
+                    {
+                        return Ok(vec![cmd]);
+                    }
+                } else {
+                    error!(
+                        "No relocation in progress upon receiving {:?}",
+                        join_response
+                    );
+                }
+
                 Ok(vec![])
             }
             // The AcceptedOnlineShare for relocation will be received here.
@@ -556,10 +527,6 @@ impl Node {
                     }
                 }
             }
-            SystemMsg::DkgFailureAgreement(sig_set) => {
-                trace!("Handling msg: Dkg-FailureAgreement from {}", sender);
-                self.handle_dkg_failure_agreement(&src_name, &sig_set).await
-            }
             SystemMsg::JoinRequest(join_request) => {
                 trace!("Handling msg: JoinRequest from {}", sender);
                 self.handle_join_request(sender, *join_request).await
@@ -595,6 +562,7 @@ impl Node {
                 )
                 .await
             }
+            // ---------------- DKG ---------------------------------
             SystemMsg::DkgStart {
                 session_id,
                 prefix,
@@ -636,6 +604,10 @@ impl Node {
                 trace!("Handling msg: Dkg-FailureObservation from {}", sender);
                 self.handle_dkg_failure_observation(session_id, &failed_participants, sig)
             }
+            SystemMsg::DkgFailureAgreement(sig_set) => {
+                trace!("Handling msg: Dkg-FailureAgreement from {}", sender);
+                self.handle_dkg_failure_agreement(&src_name, &sig_set).await
+            }
             SystemMsg::DkgNotReady {
                 message,
                 session_id,
@@ -655,272 +627,6 @@ impl Node {
             } => {
                 self.handle_dkg_retry(session_id, message_history, message, sender)
                     .await
-            }
-            SystemMsg::NodeCmd(NodeCmd::RecordStorageLevel { node_id, level, .. }) => {
-                let changed = self.set_storage_level(&node_id, level).await;
-                if changed && level.value() == MIN_LEVEL_WHEN_FULL {
-                    // ..then we accept a new node in place of the full node
-                    *self.joins_allowed.write().await = true;
-                }
-                Ok(vec![])
-            }
-            SystemMsg::NodeCmd(NodeCmd::ReceiveMetadata { metadata }) => {
-                info!("Processing received MetadataExchange packet: {:?}", msg_id);
-                self.set_adult_levels(metadata).await;
-                Ok(vec![])
-            }
-            SystemMsg::NodeEvent(NodeEvent::CouldNotStoreData {
-                node_id,
-                data,
-                full,
-            }) => {
-                info!(
-                    "Processing CouldNotStoreData event with MsgId: {:?}",
-                    msg_id
-                );
-                return if self.is_elder().await {
-                    if full {
-                        let changed = self
-                            .set_storage_level(&node_id, StorageLevel::from(StorageLevel::MAX)?)
-                            .await;
-                        if changed {
-                            // ..then we accept a new node in place of the full node
-                            *self.joins_allowed.write().await = true;
-                        }
-                    }
-                    self.replicate_data(data).await
-                } else {
-                    error!("Received unexpected message while Adult");
-                    Ok(vec![])
-                };
-            }
-            SystemMsg::NodeEvent(NodeEvent::DeviantsDetected(deviants)) => {
-                info!(
-                    "Received probable deviants nodes {deviants:?} Starting preemptive data replication"
-                );
-                debug!("{}", LogMarker::DeviantsDetected);
-
-                return self.republish_data_for_deviant_nodes(deviants).await;
-            }
-            SystemMsg::NodeCmd(NodeCmd::ReplicateData(data_collection)) => {
-                info!("ReplicateData MsgId: {:?}", msg_id);
-                return if self.is_elder().await {
-                    error!("Received unexpected message while Elder");
-                    Ok(vec![])
-                } else {
-                    let mut cmds = vec![];
-
-                    for data in data_collection {
-                        // We are an adult here, so just store away!
-                        // This may return a DatabaseFull error... but we should have reported storage increase
-                        // well before this
-                        match self.data_storage.store(&data).await {
-                            Ok(level_report) => {
-                                info!("Storage level report: {:?}", level_report);
-                                cmds.extend(self.record_storage_level_if_any(level_report).await);
-                            }
-                            Err(error) => {
-                                match error {
-                                    DbError::NotEnoughSpace => {
-                                        // db full
-                                        error!("Not enough space to store more data");
-
-                                        let node_id =
-                                            PublicKey::from(self.info.read().await.keypair.public);
-                                        let msg =
-                                            SystemMsg::NodeEvent(NodeEvent::CouldNotStoreData {
-                                                node_id,
-                                                data,
-                                                full: true,
-                                            });
-
-                                        cmds.push(self.send_msg_to_our_elders(msg).await?)
-                                    }
-                                    _ => {
-                                        error!("Problem storing data, but it was ignored: {error}");
-                                    } // the rest seem to be non-problematic errors.. (?)
-                                }
-                            }
-                        }
-                    }
-
-                    Ok(cmds)
-                };
-            }
-            SystemMsg::NodeCmd(NodeCmd::SendReplicateDataAddress(data_addresses)) => {
-                info!("ReplicateData MsgId: {:?}", msg_id);
-
-                return if self.is_elder().await {
-                    error!("Received unexpected message while Elder");
-                    Ok(vec![])
-                } else {
-                    // Collection of data addresses that we do not have
-                    let mut data_not_present = vec![];
-
-                    for data_address in data_addresses {
-                        // TODO: Check if the data name falls within our Xor namespace
-                        // Check if we already have the data
-                        match self.data_storage.get_from_local_store(&data_address).await {
-                            Err(crate::dbs::Error::NoSuchData(_))
-                            | Err(crate::dbs::Error::ChunkNotFound(_)) => {
-                                info!("to-be-replicated data is not present");
-
-                                // We do not have the data which we are supposed to have since the new reorg
-                                data_not_present.push(data_address);
-                            }
-                            Ok(_) => {
-                                info!("We already have the data that was asked to be replicated");
-                            }
-                            Err(e) => {
-                                error!("Error Sending FetchReplicateData for replication: {e}");
-                                return Ok(vec![]);
-                            }
-                        }
-                    }
-
-                    let section_pk = self.section_key_by_name(&sender.name()).await;
-                    let src_section_pk = self.network_knowledge().section_key().await;
-                    let our_info = &*self.info.read().await;
-                    let dst = crate::messaging::DstLocation::Node {
-                        name: sender.name(),
-                        section_pk,
-                    };
-                    let mut wire_msgs = vec![];
-
-                    // Chunks the collection into REPLICATION_BATCH_SIZE addresses in a batch. This avoids memory
-                    // explosion in the network when the amount of data to be replicated is high
-                    for chunked_data_address in
-                        &data_not_present.into_iter().chunks(REPLICATION_BATCH_SIZE)
-                    {
-                        let system_msg = SystemMsg::NodeCmd(NodeCmd::FetchReplicateData(
-                            chunked_data_address.collect_vec(),
-                        ));
-
-                        wire_msgs.push(WireMsg::single_src(
-                            our_info,
-                            dst,
-                            system_msg,
-                            src_section_pk,
-                        )?);
-                    }
-
-                    let cmd = Cmd::ThrottledSendBatchMsgs {
-                        throttle_duration: REPLICATION_MSG_THROTTLE_DURATION,
-                        recipients: vec![sender],
-                        wire_msgs,
-                    };
-
-                    Ok(vec![cmd])
-                };
-            }
-            SystemMsg::NodeCmd(NodeCmd::FetchReplicateData(data_addresses)) => {
-                let mut cmds = vec![];
-                info!("FetchReplicateData MsgId: {:?}", msg_id);
-                return if self.is_elder().await {
-                    error!("Received unexpected message while Elder");
-                    Ok(vec![])
-                } else {
-                    // Chunk the full list into REPLICATION_BATCH_SIZE addresses a batch
-                    let mut addresses = vec![];
-                    for chunked_data_address in
-                        &data_addresses.into_iter().chunks(REPLICATION_BATCH_SIZE)
-                    {
-                        let data_address_collection = chunked_data_address.collect_vec();
-                        addresses.push(data_address_collection);
-                    }
-
-                    // Process each batch
-                    for chunked_addresses in addresses {
-                        let mut data_collection = vec![];
-                        for data_address in chunked_addresses {
-                            match self.data_storage.get_for_replication(data_address).await {
-                                Ok(data) => {
-                                    info!("Providing {data_address:?} for replication");
-
-                                    data_collection.push(data);
-                                }
-                                Err(e) => {
-                                    warn!("Error providing data for replication: {e}");
-                                    return Ok(vec![]);
-                                }
-                            }
-                        }
-
-                        cmds.push(Cmd::SignOutgoingSystemMsg {
-                            msg: SystemMsg::NodeCmd(NodeCmd::ReplicateData(data_collection)),
-                            dst: crate::messaging::DstLocation::Node {
-                                name: sender.name(),
-                                section_pk: self.section_key_by_name(&sender.name()).await,
-                            },
-                        });
-                    }
-
-                    // Provide the requested data
-                    Ok(cmds)
-                };
-            }
-            SystemMsg::NodeCmd(node_cmd) => {
-                self.send_event(Event::MessageReceived {
-                    msg_id,
-                    src: msg_authority.src_location(),
-                    dst: dst_location,
-                    msg: Box::new(MessageReceived::NodeCmd(node_cmd)),
-                })
-                .await;
-
-                Ok(vec![])
-            }
-            SystemMsg::NodeQuery(node_query) => {
-                match node_query {
-                    // A request from EndUser - via elders - for locally stored data
-                    NodeQuery::Data {
-                        query,
-                        auth,
-                        origin,
-                        correlation_id,
-                    } => {
-                        // There is no point in verifying a sig from a sender A or B here.
-                        // Send back response to the sending elder
-                        let sender_xorname = msg_authority.get_auth_xorname();
-                        self.handle_data_query_at_adult(
-                            correlation_id,
-                            &query,
-                            auth,
-                            origin,
-                            sender_xorname,
-                        )
-                        .await
-                    }
-                    _ => {
-                        self.send_event(Event::MessageReceived {
-                            msg_id,
-                            src: msg_authority.src_location(),
-                            dst: dst_location,
-                            msg: Box::new(MessageReceived::NodeQuery(node_query)),
-                        })
-                        .await;
-                        Ok(vec![])
-                    }
-                }
-            }
-            SystemMsg::NodeQueryResponse {
-                response,
-                correlation_id,
-                user,
-            } => {
-                debug!("{:?}", LogMarker::ChunkQueryResponseReceviedFromAdult);
-                let sending_nodes_pk = match msg_authority {
-                    NodeMsgAuthority::Node(auth) => PublicKey::from(auth.into_inner().node_ed_pk),
-                    _ => return Err(Error::InvalidQueryResponseAuthority),
-                };
-
-                self.handle_data_query_response_at_elder(
-                    correlation_id,
-                    response,
-                    user,
-                    sending_nodes_pk,
-                )
-                .await
             }
             SystemMsg::DkgSessionUnknown {
                 session_id,
@@ -1016,6 +722,282 @@ impl Node {
                         .await?,
                 );
                 Ok(cmds)
+            }
+            // ------------- Node Cmd/Query/Events ------------------
+            SystemMsg::NodeCmd(cmd) => {
+                match cmd {
+                    NodeCmd::RecordStorageLevel { node_id, level, .. } => {
+                        let changed = self.set_storage_level(&node_id, level).await;
+                        if changed && level.value() == MIN_LEVEL_WHEN_FULL {
+                            // ..then we accept a new node in place of the full node
+                            *self.joins_allowed.write().await = true;
+                        }
+                        Ok(vec![])
+                    }
+                    NodeCmd::ReceiveMetadata { metadata } => {
+                        info!("Processing received MetadataExchange packet: {:?}", msg_id);
+                        self.set_adult_levels(metadata).await;
+                        Ok(vec![])
+                    }
+                    NodeCmd::ReplicateData(data_collection) => {
+                        info!("ReplicateData MsgId: {:?}", msg_id);
+                        return if self.is_elder().await {
+                            error!("Received unexpected message while Elder");
+                            Ok(vec![])
+                        } else {
+                            let mut cmds = vec![];
+
+                            for data in data_collection {
+                                // We are an adult here, so just store away!
+                                // This may return a DatabaseFull error... but we should have reported storage increase
+                                // well before this
+                                match self.data_storage.store(&data).await {
+                                    Ok(level_report) => {
+                                        info!("Storage level report: {:?}", level_report);
+                                        cmds.extend(
+                                            self.record_storage_level_if_any(level_report).await,
+                                        );
+                                    }
+                                    Err(error) => {
+                                        match error {
+                                            DbError::NotEnoughSpace => {
+                                                // db full
+                                                error!("Not enough space to store more data");
+
+                                                let node_id = PublicKey::from(
+                                                    self.info.read().await.keypair.public,
+                                                );
+                                                let msg = SystemMsg::NodeEvent(
+                                                    NodeEvent::CouldNotStoreData {
+                                                        node_id,
+                                                        data,
+                                                        full: true,
+                                                    },
+                                                );
+
+                                                cmds.push(self.send_msg_to_our_elders(msg).await?)
+                                            }
+                                            _ => {
+                                                error!("Problem storing data, but it was ignored: {error}");
+                                            } // the rest seem to be non-problematic errors.. (?)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Ok(cmds)
+                        };
+                    }
+                    NodeCmd::ReplicateDataAt(data_addresses) => {
+                        info!("ReplicateData MsgId: {:?}", msg_id);
+
+                        return if self.is_elder().await {
+                            error!("Received unexpected message while Elder");
+                            Ok(vec![])
+                        } else {
+                            // Collection of data addresses that we do not have
+                            let mut data_not_present = vec![];
+
+                            for data_address in data_addresses {
+                                // TODO: Check if the data name falls within our Xor namespace
+                                // Check if we already have the data
+                                match self.data_storage.get_from_local_store(&data_address).await {
+                                    Err(crate::dbs::Error::NoSuchData(_))
+                                    | Err(crate::dbs::Error::ChunkNotFound(_)) => {
+                                        info!("to-be-replicated data is not present");
+
+                                        // We do not have the data which we are supposed to have since the new reorg
+                                        data_not_present.push(data_address);
+                                    }
+                                    Ok(_) => {
+                                        info!("We already have the data that was asked to be replicated");
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Error Sending FetchReplicateData for replication: {e}"
+                                        );
+                                        return Ok(vec![]);
+                                    }
+                                }
+                            }
+
+                            let section_pk = self.section_key_by_name(&sender.name()).await;
+                            let src_section_pk = self.network_knowledge().section_key().await;
+                            let our_info = &*self.info.read().await;
+                            let dst = crate::messaging::DstLocation::Node {
+                                name: sender.name(),
+                                section_pk,
+                            };
+
+                            let system_msg = SystemMsg::NodeQuery(NodeQuery::System(
+                                NodeSystemQuery::GetData(data_not_present),
+                            ));
+
+                            let cmd = Cmd::SendMsg {
+                                recipients: vec![sender],
+                                wire_msg: WireMsg::single_src(
+                                    our_info,
+                                    dst,
+                                    system_msg,
+                                    src_section_pk,
+                                )?,
+                            };
+
+                            Ok(vec![cmd])
+                        };
+                    }
+                }
+            }
+            SystemMsg::NodeEvent(evnt) => {
+                match evnt {
+                    NodeEvent::DeviantsDetected(deviants) => {
+                        info!(
+                            "Received probable deviants nodes {deviants:?} Starting preemptive data replication"
+                        );
+                        debug!("{}", LogMarker::DeviantsDetected);
+
+                        return self.republish_data_for_deviant_nodes(deviants).await;
+                    }
+                    NodeEvent::CouldNotStoreData {
+                        node_id,
+                        data,
+                        full,
+                    } => {
+                        info!(
+                            "Processing CouldNotStoreData event with MsgId: {:?}",
+                            msg_id
+                        );
+                        return if self.is_elder().await {
+                            if full {
+                                let changed = self
+                                    .set_storage_level(
+                                        &node_id,
+                                        StorageLevel::from(StorageLevel::MAX)?,
+                                    )
+                                    .await;
+                                if changed {
+                                    // ..then we accept a new node in place of the full node
+                                    *self.joins_allowed.write().await = true;
+                                }
+                            }
+                            self.replicate_data(data).await
+                        } else {
+                            error!("Received unexpected message while Adult");
+                            Ok(vec![])
+                        };
+                    }
+                }
+            }
+            SystemMsg::NodeQuery(node_query) => {
+                match node_query {
+                    // A request from EndUser - via elders - for locally stored data
+                    NodeQuery::DataService {
+                        query,
+                        auth,
+                        origin,
+                        correlation_id,
+                    } => {
+                        // There is no point in verifying a sig from a sender A or B here.
+                        // Send back response to the sending elder
+                        let sender_xorname = msg_authority.get_auth_xorname();
+                        self.handle_data_query_at_adult(
+                            correlation_id,
+                            &query,
+                            auth,
+                            origin,
+                            sender_xorname,
+                        )
+                        .await
+                    }
+                    NodeQuery::System(NodeSystemQuery::GetData(data_addresses)) => {
+                        let mut cmds = vec![];
+                        info!("NodeSystemQuery::GetData MsgId: {:?}", msg_id);
+                        return if self.is_elder().await {
+                            error!("Received unexpected message while Elder");
+                            Ok(vec![])
+                        } else {
+                            // Chunk the full list into REPLICATION_BATCH_SIZE addresses a batch
+                            let mut addresses = vec![];
+                            for chunked_data_address in
+                                &data_addresses.into_iter().chunks(REPLICATION_BATCH_SIZE)
+                            {
+                                let data_address_collection = chunked_data_address.collect_vec();
+                                addresses.push(data_address_collection);
+                            }
+
+                            // Process each batch
+                            for chunked_addresses in addresses {
+                                let mut data_collection = vec![];
+                                for data_address in chunked_addresses {
+                                    match self.data_storage.get_for_replication(data_address).await
+                                    {
+                                        Ok(data) => {
+                                            info!("Providing {data_address:?} for replication");
+
+                                            data_collection.push(data);
+                                        }
+                                        Err(e) => {
+                                            warn!("Error providing data for replication: {e}");
+                                            return Ok(vec![]);
+                                        }
+                                    }
+                                }
+
+                                cmds.push(Cmd::SignOutgoingSystemMsg {
+                                    msg: SystemMsg::NodeCmd(NodeCmd::ReplicateData(
+                                        data_collection,
+                                    )),
+                                    dst: crate::messaging::DstLocation::Node {
+                                        name: sender.name(),
+                                        section_pk: self.section_key_by_name(&sender.name()).await,
+                                    },
+                                });
+                            }
+
+                            // Provide the requested data
+                            Ok(cmds)
+                        };
+                    }
+                }
+            }
+            SystemMsg::NodeQueryResponse {
+                response,
+                correlation_id,
+                user,
+            } => {
+                debug!("{:?}", LogMarker::ChunkQueryResponseReceviedFromAdult);
+                let sending_nodes_pk = match msg_authority {
+                    NodeMsgAuthority::Node(auth) => PublicKey::from(auth.into_inner().node_ed_pk),
+                    _ => return Err(Error::InvalidQueryResponseAuthority),
+                };
+
+                self.handle_data_query_response_at_elder(
+                    correlation_id,
+                    response,
+                    user,
+                    sending_nodes_pk,
+                )
+                .await
+            }
+            SystemMsg::NodeMsgError {
+                error,
+                correlation_id,
+            } => {
+                trace!(
+                    "From {:?}({:?}), received error {:?} correlated to {:?}",
+                    msg_authority.src_location(),
+                    msg_id,
+                    error,
+                    correlation_id
+                );
+                Ok(vec![])
+            }
+            // ------------------- Other ----------------------------
+            SystemMsg::BackPressure(load_report) => {
+                trace!("Handling msg: BackPressure from {}: {:?}", sender, msg_id);
+                // TODO: Factor in med/long term backpressure into general node liveness calculations
+                self.comm.regulate(sender.addr(), load_report).await;
+                Ok(vec![])
             }
         }
     }

@@ -7,9 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::{
-    data::{
-        DataCmd, DataQuery, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel,
-    },
+    data::{DataQuery, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel},
     EndUser, MsgId, ServiceAuth,
 };
 use crate::types::{
@@ -25,15 +23,6 @@ use xor_name::XorName;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum NodeCmd {
-    /// Metadata is handled by Elders
-    Metadata {
-        /// The contained cmd
-        cmd: DataCmd,
-        /// Requester pk and signature
-        auth: ServiceAuth,
-        /// Message source
-        origin: EndUser,
-    },
     /// Notify Elders on nearing max capacity
     RecordStorageLevel {
         /// Node Id
@@ -45,10 +34,8 @@ pub enum NodeCmd {
     },
     /// Tells an Adult to store a replica of the data
     ReplicateData(Vec<ReplicatedData>),
-    /// Tells an Adult to fetch and replicate data from the sender
-    SendReplicateDataAddress(Vec<ReplicatedDataAddress>),
-    /// Fetch the given replicated data we are missing
-    FetchReplicateData(Vec<ReplicatedDataAddress>),
+    /// Tells an Adult to get and replicate given data from the sender
+    ReplicateDataAt(Vec<ReplicatedDataAddress>),
     /// Sent to all promoted nodes (also sibling if any) after
     /// a completed transition to a new constellation.
     ReceiveMetadata {
@@ -78,17 +65,9 @@ pub enum NodeEvent {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeQuery {
-    /// Metadata is handled by Elders
-    Metadata {
-        /// The actual query message
-        query: DataQuery,
-        /// Client signature
-        auth: ServiceAuth,
-        /// The user that has initiated this query
-        origin: EndUser,
-    },
-    /// Data is handled by Adults
-    Data {
+    /// Service msgs are related to the services provided
+    /// by the network. Data stored by clients is handled by Adults.
+    DataService {
         /// The query
         query: DataQuery,
         /// Client signature
@@ -98,6 +77,15 @@ pub enum NodeQuery {
         /// The correlation id that recorded in Elders for this query
         correlation_id: MsgId,
     },
+    /// System msgs are related to maintaining the network system.
+    System(NodeSystemQuery),
+}
+
+/// System msgs are related to maintaining the network system.
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+pub enum NodeSystemQuery {
+    /// Get data that we need to replicate
+    GetData(Vec<ReplicatedDataAddress>),
 }
 
 /// Responses to queries from Elders to Adults.

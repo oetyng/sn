@@ -16,7 +16,7 @@ mod signed;
 pub use agreement::{DkgFailureSig, DkgFailureSigSet, DkgSessionId, Proposal, SectionAuth};
 pub use join::{JoinRejectionReason, JoinRequest, JoinResponse, ResourceProofResponse};
 pub use join_as_relocated::{JoinAsRelocatedRequest, JoinAsRelocatedResponse};
-pub use node_msgs::{NodeCmd, NodeEvent, NodeQuery, NodeQueryResponse};
+pub use node_msgs::{NodeCmd, NodeEvent, NodeQuery, NodeQueryResponse, NodeSystemQuery};
 pub use node_state::{MembershipState, NodeState, RelocateDetails};
 pub use signed::{KeyedSig, SigShare};
 
