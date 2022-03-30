@@ -30,7 +30,7 @@ use super::{
     api::cmds::Cmd,
     dkg::DkgVoter,
     network_knowledge::{NetworkKnowledge, SectionKeyShare, SectionKeysProvider},
-    Elders, Event, NodeElderChange, NodeInfo,
+    DeprecatedEvent, Elders, NodeElderChange, NodeInfo,
 };
 
 use crate::messaging::{
@@ -100,7 +100,7 @@ pub(crate) struct DkgSessionInfo {
 
 // Core state + logic of a node.
 pub(crate) struct Node {
-    pub(super) event_tx: mpsc::Sender<Event>,
+    pub(super) deprecated_event_tx: mpsc::Sender<DeprecatedEvent>,
     pub(crate) info: Arc<RwLock<NodeInfo>>,
 
     pub(crate) comm: Comm,
@@ -140,7 +140,7 @@ impl Node {
         mut info: NodeInfo,
         network_knowledge: NetworkKnowledge,
         section_key_share: Option<SectionKeyShare>,
-        event_tx: mpsc::Sender<Event>,
+        deprecated_event_tx: mpsc::Sender<DeprecatedEvent>,
         used_space: UsedSpace,
         root_storage_dir: PathBuf,
     ) -> Result<Self> {
@@ -177,7 +177,7 @@ impl Node {
             message_aggregator: SignatureAggregator::default(),
             dkg_voter: DkgVoter::default(),
             relocate_state: Arc::new(RwLock::new(None)),
-            event_tx,
+            deprecated_event_tx,
             joins_allowed: Arc::new(RwLock::new(true)),
             current_joins_semaphore: Arc::new(Semaphore::new(CONCURRENT_JOINS)),
             resource_proof: ResourceProof::new(RESOURCE_PROOF_DATA_SIZE, RESOURCE_PROOF_DIFFICULTY),
@@ -400,7 +400,7 @@ impl Node {
                 )
                 .await?;
 
-                Event::SectionSplit {
+                DeprecatedEvent::SectionSplit {
                     elders,
                     self_status_change,
                 }
@@ -417,7 +417,7 @@ impl Node {
                     .await?,
                 );
 
-                Event::EldersChanged {
+                DeprecatedEvent::EldersChanged {
                     elders,
                     self_status_change,
                 }
@@ -438,7 +438,7 @@ impl Node {
                 .await?,
             );
 
-            self.send_event(event).await
+            self.send_deprecated_event(event).await
         }
 
         Ok(cmds)

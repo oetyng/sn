@@ -30,7 +30,7 @@
 use color_eyre::{Section, SectionExt};
 use eyre::{eyre, Result, WrapErr};
 use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
-use safe_network::node::{add_connection_info, set_connection_info, Config, Error, NodeApi};
+use safe_network::node::{add_connection_info, set_connection_info, Config, Error, Event, NodeApi};
 
 #[cfg(not(feature = "tokio-console"))]
 use safe_network::LogFormatter;
@@ -267,7 +267,7 @@ async fn run_node() -> Result<()> {
     );
 
     let bootstrap_retry_duration = Duration::from_secs(BOOTSTRAP_RETRY_TIME * 60);
-    let (node, mut event_stream) = loop {
+    let (node, mut event_stream, _deprecated_stream) = loop {
         match NodeApi::new(&config, bootstrap_retry_duration).await {
             Ok(result) => break result,
             Err(Error::CannotConnectEndpoint(qp2p::EndpointError::Upnp(error))) => {
@@ -338,9 +338,19 @@ async fn run_node() -> Result<()> {
             });
     }
 
+    let root_dir_buf = config.root_dir()?;
+    let event_log_filepath = root_dir_buf.as_path().join("events.log");
+    let mut event_log = File::create(&event_log_filepath)?;
+
     // This just keeps the node going as long as routing goes
     while let Some(event) = event_stream.next().await {
-        trace!("Routing event! {:?}", event);
+        if let Event::CmdProcessing(e) = event {
+            let str = format!("{}\n\n", e);
+            if let Err(e) = event_log.write_all(str.as_bytes()) {
+                trace!("Error when writing to event log: {}", e);
+            }
+            event_log.sync_all()?;
+        }
     }
 
     Ok(())

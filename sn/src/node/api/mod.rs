@@ -17,8 +17,8 @@ pub(super) mod flowcontrol;
 
 use self::{
     cmds::Cmd,
-    event::{Elders, Event, NodeElderChange},
-    event_stream::EventStream,
+    event::{DeprecatedEvent, Elders, Event, NodeElderChange},
+    event_stream::{DeprecatedEventStream, EventStream},
     flowcontrol::FlowControl,
 };
 
@@ -66,7 +66,7 @@ pub struct NodeApi {
     flow_ctrl: FlowControl,
 }
 
-static EVENT_CHANNEL_SIZE: usize = 20;
+static DEPRECATED_EVENT_CHANNEL_SIZE: usize = 20;
 
 impl NodeApi {
     ////////////////////////////////////////////////////////////////////////////
@@ -74,7 +74,10 @@ impl NodeApi {
     ////////////////////////////////////////////////////////////////////////////
 
     /// Initialize a new node.
-    pub async fn new(config: &Config, joining_timeout: Duration) -> Result<(Self, EventStream)> {
+    pub async fn new(
+        config: &Config,
+        joining_timeout: Duration,
+    ) -> Result<(Self, EventStream, DeprecatedEventStream)> {
         let root_dir_buf = config.root_dir()?;
         let root_dir = root_dir_buf.as_path();
         tokio::fs::create_dir_all(root_dir).await?;
@@ -91,7 +94,7 @@ impl NodeApi {
 
         let used_space = UsedSpace::new(config.max_capacity());
 
-        let (api, network_events) = tokio::time::timeout(
+        let (api, network_events, deprecated_network_events) = tokio::time::timeout(
             joining_timeout,
             Self::start_node(config, used_space, root_dir),
         )
@@ -120,7 +123,7 @@ impl NodeApi {
 
         //run_system_logger(LogCtx::new(api.dispatcher.clone()), config.resource_logs).await;
 
-        Ok((api, network_events))
+        Ok((api, network_events, deprecated_network_events))
     }
 
     // Private helper to create a new node using the given config and bootstraps it to the network.
@@ -132,8 +135,9 @@ impl NodeApi {
         config: &Config,
         used_space: UsedSpace,
         root_storage_dir: &Path,
-    ) -> Result<(Self, EventStream)> {
-        let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_SIZE);
+    ) -> Result<(Self, EventStream, DeprecatedEventStream)> {
+        let (deprecated_event_tx, deprecated_event_rx) =
+            mpsc::channel(DEPRECATED_EVENT_CHANNEL_SIZE);
         let (connection_event_tx, mut connection_event_rx) = mpsc::channel(1);
 
         let local_addr = config
@@ -163,7 +167,7 @@ impl NodeApi {
             let node = Node::first_node(
                 comm,
                 info,
-                event_tx,
+                deprecated_event_tx,
                 used_space.clone(),
                 root_storage_dir.to_path_buf(),
                 genesis_sk_set,
@@ -181,7 +185,7 @@ impl NodeApi {
             };
 
             info!("{}", LogMarker::PromotedToElder);
-            node.send_event(Event::EldersChanged {
+            node.send_deprecated_event(DeprecatedEvent::EldersChanged {
                 elders,
                 self_status_change: NodeElderChange::Promoted,
             })
@@ -248,7 +252,7 @@ impl NodeApi {
                 info,
                 network_knowledge,
                 None,
-                event_tx,
+                deprecated_event_tx,
                 used_space.clone(),
                 root_storage_dir.to_path_buf(),
             )
@@ -259,15 +263,15 @@ impl NodeApi {
             node
         };
 
-        let event_stream = EventStream::new(event_rx);
-
         let node = Arc::new(node);
-
-        let flow_ctrl = FlowControl::new(node.clone(), connection_event_rx);
-
+        let (flow_ctrl, event_stream) = FlowControl::new(node.clone(), connection_event_rx);
         let api = Self { node, flow_ctrl };
 
-        Ok((api, event_stream))
+        Ok((
+            api,
+            event_stream,
+            DeprecatedEventStream::new(deprecated_event_rx),
+        ))
     }
 
     /// Returns the current age of this node.

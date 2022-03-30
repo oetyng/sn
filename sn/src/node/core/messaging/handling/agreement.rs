@@ -12,7 +12,7 @@ use crate::node::{
     core::{relocation::ChurnId, Node, Proposal},
     dkg::SectionAuthUtils,
     network_knowledge::{NodeState, SectionAuthorityProvider},
-    Event, Result, MIN_ADULT_AGE,
+    DeprecatedEvent, Result, MIN_ADULT_AGE,
 };
 use crate::types::log_markers::LogMarker;
 
@@ -97,7 +97,7 @@ impl Node {
         info!("handle Online: {} at {}", new_info.name(), new_info.addr());
 
         // still used for testing
-        self.send_event(Event::MemberJoined {
+        self.send_deprecated_event(DeprecatedEvent::MemberJoined {
             name: new_info.name(),
             previous_name: new_info.previous_name(),
             age: new_info.age(),

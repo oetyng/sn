@@ -33,7 +33,7 @@ use crate::node::{
     core::{DkgSessionInfo, Node, DATA_QUERY_LIMIT},
     messages::{NodeMsgAuthorityUtils, WireMsgUtils},
     network_knowledge::NetworkKnowledge,
-    Error, Event, MessageReceived, Result, MIN_LEVEL_WHEN_FULL,
+    DeprecatedEvent, Error, MessageReceived, Result, MIN_LEVEL_WHEN_FULL,
 };
 use crate::types::{log_markers::LogMarker, Peer, PublicKey};
 
@@ -549,7 +549,7 @@ impl Node {
                                         wire_msg,
                                     });
 
-                                    self.send_event(Event::Relocated {
+                                    self.send_deprecated_event(DeprecatedEvent::Relocated {
                                         previous_name,
                                         new_keypair,
                                     })
@@ -907,7 +907,7 @@ impl Node {
                         .await
                     }
                     _ => {
-                        self.send_event(Event::MessageReceived {
+                        self.send_deprecated_event(DeprecatedEvent::MessageReceived {
                             msg_id,
                             src: msg_authority.src_location(),
                             dst: dst_location,

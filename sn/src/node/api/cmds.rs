@@ -23,8 +23,44 @@ use std::{
     collections::BTreeSet,
     fmt,
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
+
+#[derive(Debug, Clone)]
+pub struct CmdJob {
+    id: u64, // Consider use of subcmd id e.g. parent "963111461", child "963111461.0"
+    cmd: Cmd,
+    priority: i32,
+    time: SystemTime,
+}
+
+impl CmdJob {
+    pub(crate) fn new(id: u64, cmd: Cmd, time: SystemTime) -> Self {
+        let priority = cmd.priority();
+        Self {
+            id,
+            cmd,
+            priority,
+            time,
+        }
+    }
+
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) fn cmd(&self) -> &Cmd {
+        &self.cmd
+    }
+
+    pub(crate) fn priority(&self) -> i32 {
+        self.priority
+    }
+
+    pub(crate) fn time(&self) -> SystemTime {
+        self.time
+    }
+}
 
 /// Internal cmds for a node.
 #[allow(clippy::large_enum_variant)]
@@ -144,8 +180,18 @@ impl fmt::Display for Cmd {
             }
             Cmd::HandleTimeout(_) => write!(f, "HandleTimeout"),
             Cmd::ScheduleTimeout { .. } => write!(f, "ScheduleTimeout"),
+            #[cfg(not(feature = "test-utils"))]
             Cmd::HandleMsg { wire_msg, .. } => {
                 write!(f, "HandleMsg {:?}", wire_msg.msg_id())
+            }
+            #[cfg(feature = "test-utils")]
+            Cmd::HandleMsg { wire_msg, .. } => {
+                write!(
+                    f,
+                    "HandleMsg {:?} {:?}",
+                    wire_msg.msg_id(),
+                    wire_msg.payload_debug
+                )
             }
             Cmd::HandlePeerLost(peer) => write!(f, "HandlePeerLost({:?})", peer.name()),
             Cmd::HandleAgreement { .. } => write!(f, "HandleAgreement"),
@@ -168,8 +214,18 @@ impl fmt::Display for Cmd {
             }
             Cmd::SignOutgoingSystemMsg { .. } => write!(f, "SignOutgoingSystemMsg"),
             Cmd::ThrottledSendBatchMsgs { .. } => write!(f, "ThrottledSendBatchMsgs"),
+            #[cfg(not(feature = "test-utils"))]
             Cmd::SendMsgDeliveryGroup { wire_msg, .. } => {
                 write!(f, "SendMsgDeliveryGroup {:?}", wire_msg.msg_id())
+            }
+            #[cfg(feature = "test-utils")]
+            Cmd::SendMsgDeliveryGroup { wire_msg, .. } => {
+                write!(
+                    f,
+                    "SendMsg {:?} {:?}",
+                    wire_msg.msg_id(),
+                    wire_msg.payload_debug
+                )
             }
             Cmd::SendAcceptedOnlineShare { .. } => write!(f, "SendAcceptedOnlineShare"),
             Cmd::ProposeOffline(_) => write!(f, "ProposeOffline"),

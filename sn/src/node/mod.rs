@@ -32,8 +32,8 @@ use std::{
 
 pub use self::{
     api::{
-        event::{Elders, Event, MessageReceived, NodeElderChange},
-        event_stream::EventStream,
+        event::{DeprecatedEvent, Elders, Event, MessageReceived, NodeElderChange},
+        event_stream::{DeprecatedEventStream, EventStream},
         NodeApi,
     },
     cfg::config_handler::{add_connection_info, set_connection_info, Config},

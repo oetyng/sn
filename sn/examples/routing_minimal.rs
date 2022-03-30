@@ -36,7 +36,8 @@
 use eyre::Result;
 use futures::future::join_all;
 use safe_network::node::{
-    create_test_max_capacity_and_root_storage, Config, Event, EventStream, NodeApi,
+    create_test_max_capacity_and_root_storage, Config, DeprecatedEvent as Event,
+    DeprecatedEventStream as EventStream, NodeApi,
 };
 use std::{
     convert::TryInto,
@@ -196,7 +197,7 @@ async fn start_node(
 
     let joining_timeout = Duration::from_secs(3 * 60);
 
-    let (node, event_stream) = NodeApi::new(&config, joining_timeout)
+    let (node, _, event_stream) = NodeApi::new(&config, joining_timeout)
         .await
         .expect("Failed to instantiate a Node");
 

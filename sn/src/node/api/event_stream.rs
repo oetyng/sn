@@ -6,10 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::Event;
+use super::{DeprecatedEvent, Event};
 use tokio::sync::mpsc;
 
-/// Stream of routing node events
+/// Stream of node events
 #[allow(missing_debug_implementations)]
 pub struct EventStream {
     events_rx: mpsc::Receiver<Event>,
@@ -22,6 +22,26 @@ impl EventStream {
 
     /// Returns next event
     pub async fn next(&mut self) -> Option<Event> {
+        self.events_rx.recv().await
+    }
+}
+
+/// Stream of deprecated node events
+#[allow(missing_debug_implementations)]
+pub struct DeprecatedEventStream {
+    #[allow(unused)]
+    events_rx: mpsc::Receiver<DeprecatedEvent>,
+}
+
+impl DeprecatedEventStream {
+    #[allow(unused)]
+    pub(crate) fn new(events_rx: mpsc::Receiver<DeprecatedEvent>) -> Self {
+        Self { events_rx }
+    }
+
+    /// Returns next event
+    #[allow(unused)]
+    pub async fn next(&mut self) -> Option<DeprecatedEvent> {
         self.events_rx.recv().await
     }
 }

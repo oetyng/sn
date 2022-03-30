@@ -16,7 +16,7 @@ use crate::node::{
     api::cmds::Cmd,
     error::Result,
     network_knowledge::{NetworkKnowledge, SectionAuthorityProvider, SectionKeyShare},
-    Event, NodeInfo,
+    DeprecatedEvent, NodeInfo,
 };
 use crate::types::{log_markers::LogMarker, Peer};
 use crate::UsedSpace;
@@ -31,7 +31,7 @@ impl Node {
     pub(crate) async fn first_node(
         comm: Comm,
         mut node: NodeInfo,
-        event_tx: mpsc::Sender<Event>,
+        deprecated_event_tx: mpsc::Sender<DeprecatedEvent>,
         used_space: UsedSpace,
         root_storage_dir: PathBuf,
         genesis_sk_set: bls::SecretKeySet,
@@ -46,7 +46,7 @@ impl Node {
             node,
             section,
             Some(section_key_share),
-            event_tx,
+            deprecated_event_tx,
             used_space,
             root_storage_dir,
         )
@@ -123,10 +123,9 @@ impl Node {
         self.section_keys_provider.key_share(&section_key).await
     }
 
-    pub(crate) async fn send_event(&self, event: Event) {
-        // Note: cloning the sender to avoid mutable access. Should have negligible cost.
-        if self.event_tx.clone().send(event).await.is_err() {
-            error!("Event receiver has been closed");
+    pub(crate) async fn send_deprecated_event(&self, event: DeprecatedEvent) {
+        if self.deprecated_event_tx.send(event).await.is_err() {
+            error!("DeprecatedEvent receiver has been closed");
         }
     }
 

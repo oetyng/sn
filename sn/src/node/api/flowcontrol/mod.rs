@@ -14,7 +14,7 @@ use self::dispatcher::{CmdProcessor, Dispatcher};
 
 use crate::node::api::cmds::Cmd;
 use crate::node::core::{MsgEvent, Node};
-use crate::node::Result;
+use crate::node::{EventStream, Result};
 use crate::types::log_markers::LogMarker;
 
 use std::collections::BTreeSet;
@@ -28,6 +28,8 @@ const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 const LINK_CLEANUP_INTERVAL: Duration = Duration::from_secs(120);
 const DYSFUNCTION_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
+const EVENT_CHANNEL_SIZE: usize = 2000;
+
 #[derive(Clone)]
 pub(crate) struct FlowControl {
     cmd_ctrl: CmdCtrl,
@@ -35,9 +37,13 @@ pub(crate) struct FlowControl {
 }
 
 impl FlowControl {
-    pub(crate) fn new(node: Arc<Node>, incoming_conns: mpsc::Receiver<MsgEvent>) -> Self {
+    pub(crate) fn new(
+        node: Arc<Node>,
+        incoming_conns: mpsc::Receiver<MsgEvent>,
+    ) -> (Self, EventStream) {
+        let (event_sender, event_receiver) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let dispatcher = Arc::new(Dispatcher::new(node));
-        let cmd_ctrl = CmdCtrl::new(CmdProcessor::new(dispatcher.clone()));
+        let cmd_ctrl = CmdCtrl::new(CmdProcessor::new(dispatcher.clone()), event_sender);
 
         dispatcher.clone().write_prefixmap_to_disk();
 
@@ -51,7 +57,7 @@ impl FlowControl {
         ctrl.clone().start_dysfunction_detection();
         ctrl.clone().start_cleaning_peer_links();
 
-        ctrl
+        (ctrl, EventStream::new(event_receiver))
     }
 
     pub(crate) async fn process(&self, cmd: Cmd) -> Result<()> {
@@ -212,6 +218,13 @@ async fn handle_connection_events(ctrl: FlowControl, mut incoming_conns: mpsc::R
                     sender,
                     original_bytes.len(),
                 );
+
+                #[cfg(feature = "test-utils")]
+                let wire_msg = if let Ok(msg) = wire_msg.into_msg() {
+                    wire_msg.set_payload_debug(msg)
+                } else {
+                    wire_msg
+                };
 
                 let cmd = Cmd::HandleMsg {
                     sender,

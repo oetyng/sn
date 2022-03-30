@@ -31,7 +31,7 @@ use std::{
 use structopt::StructOpt;
 use tokio::{
     sync::mpsc::{self, Sender},
-    time, // task,
+    time,
 };
 use tokio_util::time::delay_queue::DelayQueue;
 use tracing_subscriber::EnvFilter;
@@ -42,7 +42,7 @@ use safe_network::messaging::{
     data::Error::FailedToWriteFile, system::SystemMsg, DstLocation, MsgId,
 };
 use safe_network::node::{
-    create_test_max_capacity_and_root_storage, Config, Event as RoutingEvent, NodeApi,
+    create_test_max_capacity_and_root_storage, Config, DeprecatedEvent as RoutingEvent, NodeApi,
     NodeElderChange,
 };
 use safe_network::types::Cache;
@@ -641,7 +641,7 @@ async fn add_node(id: u64, mut config: Config, event_tx: Sender<Event>) -> Resul
     config.root_dir = Some(root_dir);
     let joining_timeout = Duration::from_secs(3 * 60);
 
-    let (node, mut events) = match NodeApi::new(&config, joining_timeout).await {
+    let (node, _, mut events) = match NodeApi::new(&config, joining_timeout).await {
         Ok(output) => output,
         Err(error) => {
             let _res = event_tx

@@ -8,21 +8,28 @@
 
 use super::CmdProcessor;
 
-use crate::node::{api::cmds::Cmd, Error, Result};
+use crate::node::{
+    api::{
+        cmds::{Cmd, CmdJob},
+        event::CmdProcessing,
+    },
+    Error, Event, Result,
+};
 
 use custom_debug::Debug;
 use priority_queue::PriorityQueue;
+use std::time::SystemTime;
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
 };
-use tokio::{sync::RwLock, time::Instant};
-
-// A command/subcommand id e.g. "963111461", "963111461.0"
-type CmdId = String;
+use tokio::{
+    sync::{mpsc, RwLock},
+    time::Instant,
+};
 
 type Priority = i32;
 
@@ -30,18 +37,22 @@ const MAX_RETRIES: usize = 1; // drops on first error..
 const DEFAULT_DESIRED_RATE: f64 = 50.0; // 50 msgs / s
 const SLEEP_TIME: Duration = Duration::from_millis(20);
 
+const ORDER: Ordering = Ordering::SeqCst;
+
 #[derive(Clone)]
 pub(crate) struct CmdCtrl {
-    cmd_queue: Arc<RwLock<PriorityQueue<SendJob, Priority>>>,
+    cmd_queue: Arc<RwLock<PriorityQueue<EnqueuedJob, Priority>>>,
     finished: MsgThroughput,
     attempted: MsgThroughput,
     desired_rate: Arc<RwLock<f64>>, // cmds per s
     stopped: Arc<RwLock<bool>>,
     processor: CmdProcessor,
+    id_counter: Arc<AtomicU64>,
+    event_sender: mpsc::Sender<Event>,
 }
 
 impl CmdCtrl {
-    pub(crate) fn new(processor: CmdProcessor) -> Self {
+    pub(crate) fn new(processor: CmdProcessor, event_sender: mpsc::Sender<Event>) -> Self {
         let session = Self {
             cmd_queue: Arc::new(RwLock::new(PriorityQueue::new())),
             finished: MsgThroughput::default(),
@@ -49,6 +60,8 @@ impl CmdCtrl {
             desired_rate: Arc::new(RwLock::new(DEFAULT_DESIRED_RATE)),
             stopped: Arc::new(RwLock::new(false)),
             processor,
+            id_counter: Arc::new(AtomicU64::new(0)),
+            event_sender,
         };
 
         let session_clone = session.clone();
@@ -78,11 +91,6 @@ impl CmdCtrl {
     }
 
     pub(crate) async fn push(&self, cmd: Cmd) -> Result<SendWatcher> {
-        let id: CmdId = rand::random::<u32>().to_string();
-        self.push_internal(id, cmd).await
-    }
-
-    async fn push_internal(&self, id: CmdId, cmd: Cmd) -> Result<SendWatcher> {
         if self.stopped().await {
             // should not happen (be reachable)
             return Err(Error::InvalidState);
@@ -92,12 +100,13 @@ impl CmdCtrl {
 
         let (watcher, reporter) = status_watching();
 
-        let job = SendJob {
-            id,
-            cmd,
+        let job = EnqueuedJob {
+            job: CmdJob::new(self.id_counter.fetch_add(1, ORDER), cmd, SystemTime::now()),
             retries: 0,
             reporter,
         };
+
+        info!("Enqueued: {:?}", job.job);
 
         let _ = self.cmd_queue.write().await.push(job, priority);
 
@@ -121,6 +130,12 @@ impl CmdCtrl {
     // could be accessed via a clone
     async fn stopped(&self) -> bool {
         *self.stopped.read().await
+    }
+
+    async fn notify(&self, event: Event) {
+        if self.event_sender.send(event).await.is_err() {
+            error!("Event receiver has been closed");
+        }
     }
 
     async fn keep_sending(&self) {
@@ -151,41 +166,72 @@ impl CmdCtrl {
             }
 
             let queue_res = { self.cmd_queue.write().await.pop() };
-            if let Some((mut job, prio)) = queue_res {
-                if job.retries >= MAX_RETRIES {
+            if let Some((mut enqueued, prio)) = queue_res {
+                if enqueued.retries >= MAX_RETRIES {
                     // break this loop, report error to other nodes
                     // await decision on how to continue
 
                     // (or send event on a channel (to report error to other nodes), then sleep for a very long time, then try again?)
 
-                    job.reporter
-                        .send(CtrlStatus::MaxRetriesReached(job.retries));
+                    enqueued
+                        .reporter
+                        .send(CtrlStatus::MaxRetriesReached(enqueued.retries));
 
                     continue; // this means we will drop this cmd entirely!
                 }
                 let clone = self.clone();
                 let _ = tokio::spawn(async move {
-                    match clone.processor.process_cmd(job.cmd.clone(), &job.id).await {
+                    if enqueued.retries == 0 {
+                        clone
+                            .notify(Event::CmdProcessing(CmdProcessing::Started {
+                                job: enqueued.job.clone(),
+                                time: SystemTime::now(),
+                            }))
+                            .await;
+                    } else {
+                        clone
+                            .notify(Event::CmdProcessing(CmdProcessing::Retrying {
+                                job: enqueued.job.clone(),
+                                retry: enqueued.retries,
+                                time: SystemTime::now(),
+                            }))
+                            .await;
+                    }
+                    match clone
+                        .processor
+                        .process_cmd(enqueued.job.cmd().clone())
+                        .await
+                    {
                         Ok(cmds) => {
-                            job.reporter.send(CtrlStatus::Finished);
+                            enqueued.reporter.send(CtrlStatus::Finished);
                             clone.finished.increment(); // on success
-                                                        // todo: handle the watchers..
+
+                            // todo: handle the watchers..
+                            // todo: use parent cmd prio? factor for that q: are the subcmds always _part of the completion_ of the parent cmd, or can they also be unrelated to that?
                             let _watchers = clone.extend(cmds).await;
+                            clone
+                                .notify(Event::CmdProcessing(CmdProcessing::Finished {
+                                    job: enqueued.job,
+                                    time: SystemTime::now(),
+                                }))
+                                .await;
                         }
-                        Err(err) => {
-                            job.retries += 1;
-                            job.reporter.send(CtrlStatus::Error(Arc::new(err)));
-                            let _ = clone.cmd_queue.write().await.push(job, prio);
+                        Err(error) => {
+                            clone
+                                .notify(Event::CmdProcessing(CmdProcessing::Failed {
+                                    job: enqueued.job.clone(),
+                                    retry: enqueued.retries,
+                                    time: SystemTime::now(),
+                                    error: format!("{:?}", error),
+                                }))
+                                .await;
+                            enqueued.retries += 1;
+                            enqueued.reporter.send(CtrlStatus::Error(Arc::new(error)));
+                            let _ = clone.cmd_queue.write().await.push(enqueued, prio);
                         }
                     }
                     clone.attempted.increment(); // both on fail and success
                 });
-                // trace!(
-                //     "{:?} {} cmd_id={}",
-                //     LogMarker::CmdHandlingSpawned,
-                //     cmd_display,
-                //     &job.id,
-                // );
             }
         }
     }
@@ -220,25 +266,24 @@ impl MsgThroughput {
 }
 
 #[derive(Debug)]
-pub(crate) struct SendJob {
-    cmd: Cmd,
-    id: CmdId,
+pub(crate) struct EnqueuedJob {
+    job: CmdJob,
     retries: usize,
     reporter: StatusReporting,
 }
 
-impl PartialEq for SendJob {
+impl PartialEq for EnqueuedJob {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.job.id() == other.job.id()
     }
 }
 
-impl Eq for SendJob {}
+impl Eq for EnqueuedJob {}
 
-impl std::hash::Hash for SendJob {
+impl std::hash::Hash for EnqueuedJob {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        //self.cmd.hash(state);
-        self.id.hash(state);
+        //self.job.hash(state);
+        self.job.id().hash(state);
         self.retries.hash(state);
     }
 }

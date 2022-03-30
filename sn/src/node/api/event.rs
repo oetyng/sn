@@ -6,6 +6,137 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use super::cmds::CmdJob;
+
+use chrono::{DateTime, Utc};
+use std::time::SystemTime;
+
+/// An Event raised by a `Node` or `Client` via its event sender.
+#[allow(clippy::large_enum_variant)]
+#[derive(custom_debug::Debug)]
+pub enum Event {
+    ///
+    Membership(Membership),
+    ///
+    DataHandling(DataHandling),
+    ///
+    CmdProcessing(CmdProcessing),
+}
+
+///
+#[derive(custom_debug::Debug)]
+pub enum CmdProcessing {
+    ///
+    Started {
+        ///
+        job: CmdJob,
+        ///
+        time: SystemTime,
+    },
+    ///
+    Retrying {
+        ///
+        job: CmdJob,
+        ///
+        retry: usize,
+        ///
+        time: SystemTime,
+    },
+    ///
+    Finished {
+        ///
+        job: CmdJob,
+        ///
+        time: SystemTime,
+    },
+    ///
+    Failed {
+        ///
+        job: CmdJob,
+        ///
+        retry: usize,
+        ///
+        time: SystemTime,
+        ///
+        error: String,
+    },
+}
+
+///
+//#[derive(custom_debug::Debug)]
+#[derive(Debug)]
+pub enum DataHandling {}
+
+///
+//#[derive(custom_debug::Debug)]
+#[derive(Debug)]
+pub enum Membership {}
+
+impl std::fmt::Display for CmdProcessing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CmdProcessing::Started { job, time } => {
+                let cmd = job.cmd();
+                let queued_for = job
+                    .time()
+                    .duration_since(*time)
+                    .unwrap_or_default()
+                    .as_nanos();
+                let time: DateTime<Utc> = (*time).into();
+                write!(
+                    f,
+                    "{}: Started id: {}, prio: {}, queued for {} ns. Cmd: {}",
+                    time.to_rfc3339(),
+                    job.id(),
+                    job.priority(),
+                    queued_for,
+                    cmd,
+                )
+            }
+            CmdProcessing::Retrying { job, retry, time } => {
+                let time: DateTime<Utc> = (*time).into();
+                write!(
+                    f,
+                    "{}: Retry #{} of id: {}, prio: {}",
+                    time.to_rfc3339(),
+                    retry,
+                    job.id(),
+                    job.priority(),
+                )
+            }
+            CmdProcessing::Finished { job, time } => {
+                let time: DateTime<Utc> = (*time).into();
+                write!(
+                    f,
+                    "{}: Finished id: {}, prio: {}",
+                    time.to_rfc3339(),
+                    job.id(),
+                    job.priority(),
+                )
+            }
+            CmdProcessing::Failed {
+                job,
+                retry,
+                time,
+                error,
+            } => {
+                let time: DateTime<Utc> = (*time).into();
+                write!(
+                    f,
+                    "{}: Failed id: {}, prio: {}, on try #{}, due to: {}",
+                    time.to_rfc3339(),
+                    job.id(),
+                    job.priority(),
+                    retry,
+                    error,
+                )
+            }
+        }
+    }
+}
+
+// ------------ DEPRECATED EVENT, TO BE REMOVED -----------------
+
 use crate::messaging::{
     data::ServiceMsg,
     system::{NodeCmd, NodeQuery, NodeQueryResponse},
@@ -53,7 +184,7 @@ pub struct Elders {
 /// been reached, i.e. enough members of the section have sent the same message.
 #[allow(clippy::large_enum_variant)]
 #[derive(custom_debug::Debug)]
-pub enum Event {
+pub enum DeprecatedEvent {
     /// Received a message from another Node.
     MessageReceived {
         /// The message ID

@@ -27,7 +27,7 @@ pub const FIRST_SECTION_MAX_AGE: u8 = 100;
 
 /// Information about a member of our section.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct NodeState {
+pub struct NodeState {
     peer: Peer,
     state: MembershipState,
     previous_name: Option<XorName>,

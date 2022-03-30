@@ -18,7 +18,7 @@ use crate::node::{
         Node, Proposal,
     },
     network_knowledge::NodeState,
-    Event, Result,
+    DeprecatedEvent, Result,
 };
 use crate::types::log_markers::LogMarker;
 
@@ -127,7 +127,7 @@ impl Node {
             }
             None => {
                 trace!("{}", LogMarker::RelocateStart);
-                self.send_event(Event::RelocationStarted {
+                self.send_deprecated_event(DeprecatedEvent::RelocationStarted {
                     previous_name: node.name(),
                 })
                 .await;

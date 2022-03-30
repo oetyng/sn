@@ -15,13 +15,12 @@ use crate::node::{
     messages::WireMsgUtils,
     Error, Result,
 };
-use crate::types::{log_markers::LogMarker, Peer};
+use crate::types::Peer;
 
 use itertools::Itertools;
 use std::{sync::Arc, time::Duration};
 use tokio::time::MissedTickBehavior;
 use tokio::{sync::watch, time};
-use tracing::Instrument;
 
 #[derive(Clone)]
 pub(crate) struct CmdProcessor {
@@ -33,8 +32,8 @@ impl CmdProcessor {
         Self { dispatcher }
     }
 
-    pub(crate) async fn process_cmd(&self, cmd: Cmd, id: &str) -> Result<Vec<Cmd>> {
-        self.dispatcher.process_cmd(cmd, id).await
+    pub(crate) async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
+        self.dispatcher.process_cmd(cmd).await
     }
 }
 
@@ -67,70 +66,7 @@ impl Dispatcher {
     }
 
     /// Handles a single cmd.
-    async fn process_cmd(&self, cmd: Cmd, cmd_id: &str) -> Result<Vec<Cmd>> {
-        // Create a tracing span containing info about the current node. This is very useful when
-        // analyzing logs produced by running multiple nodes within the same process, for example
-        // from integration tests.
-        let span = {
-            let node = &self.node;
-
-            let prefix = node.network_knowledge().prefix().await;
-            let is_elder = node.is_elder().await;
-            let section_key = node.network_knowledge().section_key().await;
-            let age = node.info.read().await.age();
-            trace_span!(
-                "process_cmd",
-                name = %node.info.read().await.name(),
-                prefix = format_args!("({:b})", prefix),
-                age,
-                elder = is_elder,
-                cmd_id = %cmd_id,
-                section_key = ?section_key,
-                %cmd,
-            )
-        };
-
-        async {
-            let cmd_display = cmd.to_string();
-            trace!(
-                "{:?} {:?} - {}",
-                LogMarker::CmdProcessStart,
-                cmd_id,
-                cmd_display
-            );
-
-            let res = match self.try_processing_cmd(cmd).await {
-                Ok(outcome) => {
-                    trace!(
-                        "{:?} {:?} - {}",
-                        LogMarker::CmdProcessEnd,
-                        cmd_id,
-                        cmd_display
-                    );
-                    Ok(outcome)
-                }
-                Err(error) => {
-                    error!(
-                        "Error encountered when processing cmd (cmd_id {}): {:?}",
-                        cmd_id, error
-                    );
-                    trace!(
-                        "{:?} {}: {:?}",
-                        LogMarker::CmdProcessingError,
-                        cmd_display,
-                        error
-                    );
-                    Err(error)
-                }
-            };
-            res
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Actually process the cmd
-    async fn try_processing_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
+    async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
         match cmd {
             Cmd::CleanupPeerLinks => {
                 let linked_peers = self.node.comm.linked_peers().await;
