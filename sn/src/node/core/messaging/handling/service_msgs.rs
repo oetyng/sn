@@ -145,7 +145,13 @@ impl Node {
 
         for peer in waiting_peers.iter() {
             let dst = DstLocation::EndUser(EndUser(peer.name()));
-            let wire_msg = WireMsg::new_msg(msg_id, payload.clone(), msg_kind.clone(), dst)?;
+            let wire_msg = WireMsg::new_msg(
+                msg_id,
+                payload.clone(),
+                msg_kind.clone(),
+                msg.priority(),
+                dst,
+            )?;
 
             debug!("Responding with the first query response to {:?}", dst);
 

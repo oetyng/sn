@@ -773,7 +773,7 @@ impl Node {
                     Ok(cmds)
                 };
             }
-            SystemMsg::NodeCmd(NodeCmd::SendReplicateDataAddress(data_addresses)) => {
+            SystemMsg::NodeCmd(NodeCmd::ReplicateDataAt(data_addresses)) => {
                 info!("ReplicateData MsgId: {:?}", msg_id);
 
                 return if self.is_elder().await {
@@ -884,17 +884,6 @@ impl Node {
                     // Provide the requested data
                     Ok(cmds)
                 };
-            }
-            SystemMsg::NodeCmd(node_cmd) => {
-                self.send_event(Event::MessageReceived {
-                    msg_id,
-                    src: msg_authority.src_location(),
-                    dst: dst_location,
-                    msg: Box::new(MessageReceived::NodeCmd(node_cmd)),
-                })
-                .await;
-
-                Ok(vec![])
             }
             SystemMsg::NodeQuery(node_query) => {
                 match node_query {

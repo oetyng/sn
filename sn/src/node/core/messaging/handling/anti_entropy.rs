@@ -839,7 +839,13 @@ mod tests {
 
             let msg_kind = MsgKind::NodeAuthMsg(node_auth.into_inner());
 
-            let wire_msg = WireMsg::new_msg(msg_id, payload, msg_kind, dst_location)?;
+            let wire_msg = WireMsg::new_msg(
+                msg_id,
+                payload,
+                msg_kind,
+                payload_msg.priority(),
+                dst_location,
+            )?;
 
             let src_location = SrcLocation::Node {
                 name: sender_name,

@@ -7,9 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::{
-    data::{
-        DataCmd, DataQuery, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel,
-    },
+    data::{DataQuery, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel},
     EndUser, MsgId, ServiceAuth,
 };
 use crate::types::{
@@ -25,15 +23,6 @@ use xor_name::XorName;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum NodeCmd {
-    /// Metadata is handled by Elders
-    Metadata {
-        /// The contained cmd
-        cmd: DataCmd,
-        /// Requester pk and signature
-        auth: ServiceAuth,
-        /// Message source
-        origin: EndUser,
-    },
     /// Notify Elders on nearing max capacity
     RecordStorageLevel {
         /// Node Id
@@ -46,7 +35,7 @@ pub enum NodeCmd {
     /// Tells an Adult to store a replica of the data
     ReplicateData(Vec<ReplicatedData>),
     /// Tells an Adult to fetch and replicate data from the sender
-    SendReplicateDataAddress(Vec<ReplicatedDataAddress>),
+    ReplicateDataAt(Vec<ReplicatedDataAddress>),
     /// Fetch the given replicated data we are missing
     FetchReplicateData(Vec<ReplicatedDataAddress>),
     /// Sent to all promoted nodes (also sibling if any) after

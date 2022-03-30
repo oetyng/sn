@@ -55,6 +55,7 @@ impl NodeState {
 
     // Creates a `NodeState` in the `Left` state.
     #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn left(peer: Peer, previous_name: Option<XorName>) -> Self {
         Self {
             peer,
@@ -65,6 +66,7 @@ impl NodeState {
 
     // Creates a `NodeState` in the `Relocated` state.
     #[cfg(test)]
+    #[allow(unused)]
     pub(crate) fn relocated(
         peer: Peer,
         previous_name: Option<XorName>,

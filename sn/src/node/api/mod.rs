@@ -11,27 +11,30 @@ pub(crate) mod tests;
 
 pub(crate) mod cmds;
 
-pub(super) mod dispatcher;
 pub(super) mod event;
 pub(super) mod event_stream;
+pub(super) mod flowcontrol;
 
 use self::{
     cmds::Cmd,
-    dispatcher::Dispatcher,
     event::{Elders, Event, NodeElderChange},
     event_stream::EventStream,
+    flowcontrol::FlowControl,
 };
 
 use crate::messaging::{system::SystemMsg, DstLocation, WireMsg};
 use crate::node::{
     cfg::keypair_storage::{get_reward_pk, store_network_keypair, store_new_reward_keypair},
-    core::{join_network, Comm, MsgEvent, Node},
+    core::{join_network, Comm, Node},
     ed25519,
     error::{Error, Result},
-    logging::{log_ctx::LogCtx, run_system_logger},
+    //logging::{log_ctx::LogCtx, run_system_logger},
     messages::WireMsgUtils,
     network_knowledge::SectionAuthorityProvider,
-    Config, NodeInfo, Peer, MIN_ADULT_AGE,
+    Config,
+    NodeInfo,
+    Peer,
+    MIN_ADULT_AGE,
 };
 use crate::types::{log_markers::LogMarker, PublicKey as TypesPublicKey};
 use crate::UsedSpace;
@@ -47,7 +50,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{sync::mpsc, task};
+use tokio::sync::mpsc;
 use xor_name::{Prefix, XorName};
 
 /// Interface for sending and receiving messages to and from other nodes, in the role of a full
@@ -59,7 +62,8 @@ use xor_name::{Prefix, XorName};
 /// role, and can be `crate::messaging::SrcLocation::Node` or `crate::messaging::SrcLocation::Section`.
 #[allow(missing_debug_implementations)]
 pub struct NodeApi {
-    dispatcher: Arc<Dispatcher>,
+    node: Arc<Node>,
+    flow_ctrl: FlowControl,
 }
 
 static EVENT_CHANNEL_SIZE: usize = 20;
@@ -95,7 +99,7 @@ impl NodeApi {
         .map_err(|_| Error::JoinTimeout)??;
 
         // Network keypair may have to be changed due to naming criteria or network requirements.
-        let keypair_as_bytes = api.dispatcher.node.info.read().await.keypair.to_bytes();
+        let keypair_as_bytes = api.node.info.read().await.keypair.to_bytes();
         store_network_keypair(root_dir, keypair_as_bytes).await?;
 
         let our_pid = std::process::id();
@@ -114,7 +118,7 @@ impl NodeApi {
             our_pid, node_prefix, node_name, node_age, our_conn_info_json,
         );
 
-        run_system_logger(LogCtx::new(api.dispatcher.clone()), config.resource_logs).await;
+        //run_system_logger(LogCtx::new(api.dispatcher.clone()), config.resource_logs).await;
 
         Ok((api, network_events))
     }
@@ -255,81 +259,70 @@ impl NodeApi {
             node
         };
 
-        let dispatcher = Arc::new(Dispatcher::new(node));
         let event_stream = EventStream::new(event_rx);
 
-        // Start listening to incoming connections.
-        let _handle = task::spawn(handle_connection_events(
-            dispatcher.clone(),
-            connection_event_rx,
-        ));
+        let node = Arc::new(node);
 
-        dispatcher.clone().start_network_probing().await;
-        dispatcher
-            .clone()
-            .check_for_dysfunction_periodically()
-            .await;
-        dispatcher.clone().start_cleaning_peer_links().await;
-        dispatcher.clone().write_prefixmap_to_disk().await;
+        let flow_ctrl = FlowControl::new(node.clone(), connection_event_rx);
 
-        let api = Self { dispatcher };
+        let api = Self { node, flow_ctrl };
 
         Ok((api, event_stream))
     }
 
     /// Returns the current age of this node.
     pub async fn age(&self) -> u8 {
-        self.dispatcher.node.info.read().await.age()
+        self.node.info.read().await.age()
     }
 
     /// Returns the ed25519 public key of this node.
     pub async fn public_key(&self) -> PublicKey {
-        self.dispatcher.node.info.read().await.keypair.public
+        self.node.info.read().await.keypair.public
     }
 
     /// The name of this node.
     pub async fn name(&self) -> XorName {
-        self.dispatcher.node.info.read().await.name()
+        self.node.info.read().await.name()
     }
 
     /// Returns connection info of this node.
     pub async fn our_connection_info(&self) -> SocketAddr {
-        self.dispatcher.node.our_connection_info()
+        self.node.our_connection_info()
     }
 
     /// Returns the Section Signed Chain
     pub async fn section_chain(&self) -> SecuredLinkedList {
-        self.dispatcher.node.section_chain().await
+        self.node.section_chain().await
     }
 
     /// Returns the Section Chain's genesis key
     pub async fn genesis_key(&self) -> bls::PublicKey {
-        *self.dispatcher.node.network_knowledge().genesis_key()
+        *self.node.network_knowledge().genesis_key()
     }
 
     /// Prefix of our section
     pub async fn our_prefix(&self) -> Prefix {
-        self.dispatcher.node.network_knowledge().prefix().await
+        self.node.network_knowledge().prefix().await
     }
 
     /// Returns whether the node is Elder.
     pub async fn is_elder(&self) -> bool {
-        self.dispatcher.node.is_elder().await
+        self.node.is_elder().await
     }
 
     /// Returns the information of all the current section elders.
     pub async fn our_elders(&self) -> Vec<Peer> {
-        self.dispatcher.node.network_knowledge().elders().await
+        self.node.network_knowledge().elders().await
     }
 
     /// Returns the information of all the current section adults.
     pub async fn our_adults(&self) -> Vec<Peer> {
-        self.dispatcher.node.network_knowledge().adults().await
+        self.node.network_knowledge().adults().await
     }
 
     /// Returns the info about the section matching the name.
     pub async fn matching_section(&self, name: &XorName) -> Result<SectionAuthorityProvider> {
-        self.dispatcher.node.matching_section(name).await
+        self.node.matching_section(name).await
     }
 
     /// Builds a WireMsg signed by this Node
@@ -340,7 +333,7 @@ impl NodeApi {
     ) -> Result<WireMsg> {
         let src_section_pk = *self.section_chain().await.last_key();
         WireMsg::single_src(
-            &self.dispatcher.node.info.read().await.clone(),
+            &self.node.info.read().await.clone(),
             dst,
             node_msg,
             src_section_pk,
@@ -356,11 +349,8 @@ impl NodeApi {
             wire_msg.msg_id()
         );
 
-        if let Some(cmd) = self.dispatcher.node.send_msg_to_nodes(wire_msg).await? {
-            self.dispatcher
-                .clone()
-                .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                .await?;
+        if let Some(cmd) = self.node.send_msg_to_nodes(wire_msg).await? {
+            self.flow_ctrl.process(cmd).await?;
         }
 
         Ok(())
@@ -369,53 +359,6 @@ impl NodeApi {
     /// Returns the current BLS public key set if this node has one, or
     /// `Error::MissingSecretKeyShare` otherwise.
     pub async fn public_key_set(&self) -> Result<bls::PublicKeySet> {
-        self.dispatcher.node.public_key_set().await
+        self.node.public_key_set().await
     }
-}
-
-// Listen for incoming connection events and handle them.
-async fn handle_connection_events(
-    dispatcher: Arc<Dispatcher>,
-    mut incoming_conns: mpsc::Receiver<MsgEvent>,
-) {
-    while let Some(event) = incoming_conns.recv().await {
-        match event {
-            MsgEvent::Received {
-                sender,
-                wire_msg,
-                original_bytes,
-            } => {
-                debug!(
-                    "New message ({} bytes) received from: {:?}",
-                    original_bytes.len(),
-                    sender
-                );
-
-                let span = {
-                    let node = &dispatcher.node;
-                    trace_span!("handle_message", name = %node.info.read().await.name(), ?sender, msg_id = ?wire_msg.msg_id())
-                };
-                let _span_guard = span.enter();
-
-                trace!(
-                    "{:?} from {:?} length {}",
-                    LogMarker::DispatchHandleMsgCmd,
-                    sender,
-                    original_bytes.len(),
-                );
-                let cmd = Cmd::HandleMsg {
-                    sender,
-                    wire_msg,
-                    original_bytes: Some(original_bytes),
-                };
-
-                let _handle = dispatcher
-                    .clone()
-                    .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                    .await;
-            }
-        }
-    }
-
-    error!("Fatal error, the stream for incoming connections has been unexpectedly closed. No new connections or messages can be received from the network from here on.");
 }

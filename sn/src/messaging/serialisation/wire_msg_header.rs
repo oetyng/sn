@@ -39,6 +39,7 @@ pub struct WireMsgHeader {
 pub struct MsgEnvelope {
     pub msg_id: MsgId,
     pub msg_kind: MsgKind,
+    pub priority: i32,
     pub dst_location: DstLocation,
 }
 
@@ -73,13 +74,14 @@ lazy_static! {
 
 impl WireMsgHeader {
     // Instantiate a WireMsgHeader as per current supported version.
-    pub fn new(msg_id: MsgId, msg_kind: MsgKind, dst_location: DstLocation) -> Self {
+    pub fn new(msg_id: MsgId, msg_kind: MsgKind, priority: i32, dst_location: DstLocation) -> Self {
         Self {
             //header_size: Self::max_size(),
             version: MESSAGING_PROTO_VERSION,
             msg_envelope: MsgEnvelope {
                 msg_id,
                 msg_kind,
+                priority,
                 dst_location,
             },
         }

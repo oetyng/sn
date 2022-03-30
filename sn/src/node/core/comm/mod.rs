@@ -181,7 +181,7 @@ impl Comm {
 
         let bytes = wire_msg.serialize()?;
         // TODO: rework priority so this we dont need to deserialise payload to determine priority.
-        let priority = wire_msg.into_msg()?.priority();
+        let priority = wire_msg.priority();
 
         let (_, result) = self
             .send_to_one(*recipient, wire_msg.msg_id(), priority, bytes)
@@ -312,7 +312,7 @@ impl Comm {
         }
 
         let msg_bytes = wire_msg.serialize().map_err(Error::Messaging)?;
-        let priority = wire_msg.clone().into_msg()?.priority();
+        let priority = wire_msg.clone().priority();
 
         // Run all the sends concurrently (using `FuturesUnordered`). If any of them fails, pick
         // the next recipient and try to send to them. Proceed until the needed number of sends
@@ -839,9 +839,8 @@ mod tests {
         let mut rng = OsRng;
         let src_keypair = Keypair::new_ed25519(&mut rng);
 
-        let payload = WireMsg::serialize_msg_payload(&ServiceMsg::Query(DataQuery::GetChunk(
-            ChunkAddress(xor_name::rand::random()),
-        )))?;
+        let msg = ServiceMsg::Query(DataQuery::GetChunk(ChunkAddress(xor_name::rand::random())));
+        let payload = WireMsg::serialize_msg_payload(&msg)?;
         let auth = ServiceAuth {
             public_key: src_keypair.public_key(),
             signature: src_keypair.sign(&payload),
@@ -851,6 +850,7 @@ mod tests {
             MsgId::new(),
             payload,
             MsgKind::ServiceMsg(auth),
+            msg.priority(),
             dst_location,
         )?;
 

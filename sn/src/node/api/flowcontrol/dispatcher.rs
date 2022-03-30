@@ -6,7 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::Cmd;
+use super::super::Cmd;
 
 use crate::elder_count;
 use crate::messaging::{system::SystemMsg, MsgKind, WireMsg};
@@ -18,21 +18,29 @@ use crate::node::{
 use crate::types::{log_markers::LogMarker, Peer};
 
 use itertools::Itertools;
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::time::MissedTickBehavior;
 use tokio::{sync::watch, time};
 use tracing::Instrument;
 
-const PROBE_INTERVAL: Duration = Duration::from_secs(30);
-const LINK_CLEANUP_INTERVAL: Duration = Duration::from_secs(120);
-const DYSFUNCTION_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+#[derive(Clone)]
+pub(crate) struct CmdProcessor {
+    dispatcher: Arc<Dispatcher>,
+}
 
-// A command/subcommand id e.g. "963111461", "963111461.0"
-type CmdId = String;
+impl CmdProcessor {
+    pub(crate) fn new(dispatcher: Arc<Dispatcher>) -> Self {
+        Self { dispatcher }
+    }
+
+    pub(crate) async fn process_cmd(&self, cmd: Cmd, id: &str) -> Result<Vec<Cmd>> {
+        self.dispatcher.process_cmd(cmd, id).await
+    }
+}
 
 // Cmd Dispatcher.
 pub(crate) struct Dispatcher {
-    pub(crate) node: Node,
+    pub(crate) node: Arc<Node>,
     cancel_timer_tx: watch::Sender<bool>,
     cancel_timer_rx: watch::Receiver<bool>,
 }
@@ -45,7 +53,7 @@ impl Drop for Dispatcher {
 }
 
 impl Dispatcher {
-    pub(super) fn new(node: Node) -> Self {
+    pub(super) fn new(node: Arc<Node>) -> Self {
         let (cancel_timer_tx, cancel_timer_rx) = watch::channel(false);
         Self {
             node,
@@ -54,175 +62,12 @@ impl Dispatcher {
         }
     }
 
-    /// Enqueues the given cmd and handles whatever cmd is in the next priority queue and triggers handling after any required waits for higher priority tasks
-    pub(super) async fn enqueue_and_handle_next_cmd_and_offshoots(
-        self: Arc<Self>,
-        cmd: Cmd,
-        cmd_id: Option<CmdId>,
-    ) -> Result<()> {
-        let _ = tokio::spawn(async {
-            let cmd_id: CmdId = cmd_id.unwrap_or_else(|| rand::random::<u32>().to_string());
-
-            self.handle_cmd_and_offshoots(cmd, Some(cmd_id)).await
-        });
-        Ok(())
-    }
-
-    /// Handles cmd and transitively queues any new cmds that are
-    /// produced during its handling. Trace logs will include the provided cmd id,
-    /// and any sub-cmds produced will have it as a common root cmd id.
-    /// If a cmd id string is not provided a random one will be generated.
-    pub(super) async fn handle_cmd_and_offshoots(
-        self: Arc<Self>,
-        cmd: Cmd,
-        cmd_id: Option<CmdId>,
-    ) -> Result<()> {
-        let cmd_id = cmd_id.unwrap_or_else(|| rand::random::<u32>().to_string());
-        let cmd_id_clone = cmd_id.clone();
-        let cmd_display = cmd.to_string();
-        let _task = tokio::spawn(async move {
-            match self.process_cmd(cmd, &cmd_id).await {
-                Ok(cmds) => {
-                    for (sub_cmd_count, cmd) in cmds.into_iter().enumerate() {
-                        let sub_cmd_id = format!("{}.{}", &cmd_id, sub_cmd_count);
-                        // Error here is only related to queueing, and so a dropped cmd will be logged
-                        let _result = self.clone().spawn_cmd_handling(cmd, sub_cmd_id);
-                    }
-                }
-                Err(err) => {
-                    error!("Failed to handle cmd {:?} with error {:?}", cmd_id, err);
-                }
-            }
-        });
-
-        trace!(
-            "{:?} {} cmd_id={}",
-            LogMarker::CmdHandlingSpawned,
-            cmd_display,
-            &cmd_id_clone
-        );
-        Ok(())
-    }
-
-    // Note: this indirecton is needed. Trying to call `spawn(self.handle_cmds(...))` directly
-    // inside `handle_cmds` causes compile error about type check cycle.
-    fn spawn_cmd_handling(self: Arc<Self>, cmd: Cmd, cmd_id: String) -> Result<()> {
-        let _task = tokio::spawn(self.enqueue_and_handle_next_cmd_and_offshoots(cmd, Some(cmd_id)));
-        Ok(())
-    }
-
-    pub(super) async fn start_network_probing(self: Arc<Self>) {
-        info!("Starting to probe network");
-        let _handle = tokio::spawn(async move {
-            let dispatcher = self.clone();
-            let mut interval = tokio::time::interval(PROBE_INTERVAL);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                let _instant = interval.tick().await;
-
-                // Send a probe message if we are an elder
-                let node = &dispatcher.node;
-                if node.is_elder().await && !node.network_knowledge().prefix().await.is_empty() {
-                    match node.generate_probe_msg().await {
-                        Ok(cmd) => {
-                            info!("Sending probe msg");
-                            if let Err(e) = dispatcher
-                                .clone()
-                                .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                                .await
-                            {
-                                error!("Error sending a probe msg to the network: {:?}", e);
-                            }
-                        }
-                        Err(error) => error!("Problem generating probe msg: {:?}", error),
-                    }
-                }
-            }
-        });
-    }
-    pub(super) async fn start_cleaning_peer_links(self: Arc<Self>) {
-        info!("Starting cleaning up network links");
-        let _handle = tokio::spawn(async move {
-            let dispatcher = self.clone();
-            let mut interval = tokio::time::interval(LINK_CLEANUP_INTERVAL);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            let _ = interval.tick().await;
-
-            loop {
-                let _ = interval.tick().await;
-                let cmd = Cmd::CleanupPeerLinks;
-                if let Err(e) = dispatcher
-                    .clone()
-                    .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                    .await
-                {
-                    error!(
-                        "Error requesting a cleaning up of unused PeerLinks: {:?}",
-                        e
-                    );
-                }
-            }
-        });
-    }
-    pub(super) async fn check_for_dysfunction_periodically(self: Arc<Self>) {
-        info!("Starting dysfunction checking");
-        let _handle = tokio::spawn(async move {
-            let dispatcher = self.clone();
-            let mut interval = tokio::time::interval(DYSFUNCTION_CHECK_INTERVAL);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                let _instant = interval.tick().await;
-
-                let unresponsive_nodes = match dispatcher.node.get_dysfunctional_node_names().await
-                {
-                    Ok(nodes) => nodes,
-                    Err(error) => {
-                        error!("Error getting dysfunctional nodes: {error}");
-                        BTreeSet::default()
-                    }
-                };
-
-                if !unresponsive_nodes.is_empty() {
-                    debug!("{:?} : {unresponsive_nodes:?}", LogMarker::ProposeOffline);
-                    let cmd = Cmd::ProposeOffline(unresponsive_nodes);
-                    if let Err(e) = dispatcher
-                        .clone()
-                        .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                        .await
-                    {
-                        error!("Error sending Propose Offline for dysfunctional nodes: {e:?}");
-                    }
-                }
-
-                match dispatcher.node.notify_about_newly_suspect_nodes().await {
-                    Ok(suspect_cmds) => {
-                        for cmd in suspect_cmds {
-                            if let Err(e) = dispatcher
-                                .clone()
-                                .enqueue_and_handle_next_cmd_and_offshoots(cmd, None)
-                                .await
-                            {
-                                error!("Error processing suspect node cmds: {:?}", e);
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        error!("Error getting suspect nodes: {error}");
-                    }
-                };
-            }
-        });
-    }
-
-    pub(super) async fn write_prefixmap_to_disk(self: Arc<Self>) {
-        info!("Writing our PrefixMap to disk");
-        self.clone().node.write_prefix_map().await
+    pub(super) fn write_prefixmap_to_disk(self: Arc<Self>) {
+        let _handle = tokio::spawn(async move { self.node.write_prefix_map().await });
     }
 
     /// Handles a single cmd.
-    pub(super) async fn process_cmd(&self, cmd: Cmd, cmd_id: &str) -> Result<Vec<Cmd>> {
+    async fn process_cmd(&self, cmd: Cmd, cmd_id: &str) -> Result<Vec<Cmd>> {
         // Create a tracing span containing info about the current node. This is very useful when
         // analyzing logs produced by running multiple nodes within the same process, for example
         // from integration tests.

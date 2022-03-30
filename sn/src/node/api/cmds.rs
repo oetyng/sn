@@ -97,6 +97,45 @@ pub(crate) enum Cmd {
     TestConnectivity(XorName),
 }
 
+impl Cmd {
+    /// The priority of the cmd
+    pub(crate) fn priority(&self) -> i32 {
+        use Cmd::*;
+        let prio = match self {
+            HandleAgreement { .. } => 10,
+            HandleNewEldersAgreement { .. } => 10,
+            HandleDkgOutcome { .. } => 10,
+            HandleDkgFailure(_) => 10,
+            SendAcceptedOnlineShare { .. } => 10,
+            HandlePeerLost(_) => 10,
+            ProposeOffline(_) => 10,
+
+            HandleTimeout(_) => 9,
+            HandleNewNodeOnline(_) => 9,
+
+            ScheduleTimeout { .. } => 8,
+            StartConnectivityTest(_) => 8,
+            TestConnectivity(_) => 8,
+
+            HandleMsg { wire_msg, .. } => wire_msg.priority(),
+            SendMsg { wire_msg, .. } => wire_msg.priority(),
+            SignOutgoingSystemMsg { msg, .. } => msg.priority(),
+            SendMsgDeliveryGroup { wire_msg, .. } => wire_msg.priority(),
+            ThrottledSendBatchMsgs { wire_msgs, .. } => {
+                if wire_msgs.is_empty() {
+                    -11
+                } else {
+                    wire_msgs.iter().map(|msg| msg.priority()).sum::<i32>() / wire_msgs.len() as i32
+                }
+            }
+
+            CleanupPeerLinks => -10,
+        };
+
+        prio
+    }
+}
+
 impl fmt::Display for Cmd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

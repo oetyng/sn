@@ -6,12 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::Link;
+use super::CmdProcessor;
 
-use crate::messaging::MsgId;
-use crate::node::{Error, Result};
+use crate::node::{api::cmds::Cmd, Error, Result};
 
-use bytes::Bytes;
 use custom_debug::Debug;
 use priority_queue::PriorityQueue;
 use std::{
@@ -23,31 +21,34 @@ use std::{
 };
 use tokio::{sync::RwLock, time::Instant};
 
+// A command/subcommand id e.g. "963111461", "963111461.0"
+type CmdId = String;
+
 type Priority = i32;
 
-const MAX_RETRIES: usize = 10;
-const DEFAULT_DESIRED_RATE: f64 = 10.0; // 10 msgs / s
-const SLEEP_TIME: Duration = Duration::from_millis(200);
+const MAX_RETRIES: usize = 1; // drops on first error..
+const DEFAULT_DESIRED_RATE: f64 = 50.0; // 50 msgs / s
+const SLEEP_TIME: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
-pub(crate) struct PeerSession {
-    link: Link,
-    msg_queue: Arc<RwLock<PriorityQueue<SendJob, Priority>>>,
-    sent: MsgThroughput,
+pub(crate) struct CmdCtrl {
+    cmd_queue: Arc<RwLock<PriorityQueue<SendJob, Priority>>>,
+    finished: MsgThroughput,
     attempted: MsgThroughput,
-    peer_desired_rate: Arc<RwLock<f64>>, // msgs per s
-    disconnnected: Arc<RwLock<bool>>,
+    desired_rate: Arc<RwLock<f64>>, // cmds per s
+    stopped: Arc<RwLock<bool>>,
+    processor: CmdProcessor,
 }
 
-impl PeerSession {
-    pub(crate) fn new(link: Link) -> Self {
+impl CmdCtrl {
+    pub(crate) fn new(processor: CmdProcessor) -> Self {
         let session = Self {
-            link,
-            msg_queue: Arc::new(RwLock::new(PriorityQueue::new())),
-            sent: MsgThroughput::default(),
+            cmd_queue: Arc::new(RwLock::new(PriorityQueue::new())),
+            finished: MsgThroughput::default(),
             attempted: MsgThroughput::default(),
-            peer_desired_rate: Arc::new(RwLock::new(DEFAULT_DESIRED_RATE)),
-            disconnnected: Arc::new(RwLock::new(false)),
+            desired_rate: Arc::new(RwLock::new(DEFAULT_DESIRED_RATE)),
+            stopped: Arc::new(RwLock::new(false)),
+            processor,
         };
 
         let session_clone = session.clone();
@@ -56,110 +57,100 @@ impl PeerSession {
         session
     }
 
-    pub(crate) async fn remove_expired(&self) {
-        self.link.remove_expired().await
-    }
-
-    pub(crate) async fn is_connected(&self) -> bool {
-        self.link.is_connected().await
-    }
-
     #[allow(unused)]
     pub(crate) async fn throughput(&self) -> f64 {
-        self.sent.value()
+        self.finished.value()
     }
 
     #[allow(unused)]
     pub(crate) async fn success_ratio(&self) -> f64 {
-        self.sent.value() / self.attempted.value()
+        self.finished.value() / self.attempted.value()
     }
 
-    // this must be restricted somehow, we can't allow an unbounded inflow
-    // of connections from a peer...
-    pub(crate) async fn add(&self, conn: qp2p::Connection) {
-        if self.disconnected().await {
-            // if we have disconnected from a peer, will we allow it to connect to us again anyway..??
-            conn.close(Some(
-                "We have disconnected from the peer and do not allow incoming connections."
-                    .to_string(),
-            ));
-            return;
+    pub(crate) async fn extend(&self, cmds: Vec<Cmd>) -> Vec<Result<SendWatcher>> {
+        let mut results = vec![];
+
+        for cmd in cmds {
+            let _ = results.push(self.push(cmd).await);
         }
 
-        self.link.add(conn).await
+        results
     }
 
-    pub(crate) async fn send(
-        &self,
-        msg_id: MsgId,
-        msg_priority: i32,
-        msg_bytes: Bytes,
-    ) -> Result<SendWatcher> {
-        if self.disconnected().await {
-            // should not happen (be reachable) if we only access PeerSession from Comm
+    pub(crate) async fn push(&self, cmd: Cmd) -> Result<SendWatcher> {
+        let id: CmdId = rand::random::<u32>().to_string();
+        self.push_internal(id, cmd).await
+    }
+
+    async fn push_internal(&self, id: CmdId, cmd: Cmd) -> Result<SendWatcher> {
+        if self.stopped().await {
+            // should not happen (be reachable)
             return Err(Error::InvalidState);
         }
+
+        let priority = cmd.priority();
 
         let (watcher, reporter) = status_watching();
 
         let job = SendJob {
-            msg_id,
-            msg_bytes,
+            id,
+            cmd,
             retries: 0,
             reporter,
         };
 
-        let _ = self.msg_queue.write().await.push(job, msg_priority);
+        let _ = self.cmd_queue.write().await.push(job, priority);
 
         Ok(watcher)
     }
 
-    pub(crate) async fn update_send_rate(&self, peer_desired_rate: f64) {
-        *self.peer_desired_rate.write().await = peer_desired_rate;
+    #[allow(unused)]
+    pub(crate) async fn update_send_rate(&self, desired_rate: f64) {
+        *self.desired_rate.write().await = desired_rate;
     }
 
     // consume self
     // NB that clones could still exist, however they would be in the disconnected state
     // if only accessing via session map (as intended)
-    pub(crate) async fn disconnect(self) {
-        *self.disconnnected.write().await = true;
-        self.msg_queue.write().await.clear();
-        self.link.disconnect().await;
+    #[allow(unused)]
+    pub(crate) async fn stop(self) {
+        *self.stopped.write().await = true;
+        self.cmd_queue.write().await.clear();
     }
 
     // could be accessed via a clone
-    async fn disconnected(&self) -> bool {
-        *self.disconnnected.read().await
+    async fn stopped(&self) -> bool {
+        *self.stopped.read().await
     }
 
     async fn keep_sending(&self) {
         loop {
-            if self.disconnected().await {
+            if self.stopped().await {
                 break;
             }
 
-            let expected_rate = { *self.peer_desired_rate.read().await };
+            let expected_rate = { *self.desired_rate.read().await };
             let actual_rate = self.attempted.value();
             if actual_rate > expected_rate {
                 let diff = actual_rate - expected_rate;
                 let diff_ms = Duration::from_millis((diff * 1000_f64) as u64);
                 tokio::time::sleep(diff_ms).await;
                 continue;
-            } else if self.msg_queue.read().await.is_empty() {
+            } else if self.cmd_queue.read().await.is_empty() {
                 tokio::time::sleep(SLEEP_TIME).await;
                 continue;
             }
 
             #[cfg(feature = "test-utils")]
             {
-                let queue = self.msg_queue.read().await;
-                debug!("Peer {} queue length: {}", self.link.peer(), queue.len());
+                let queue = self.cmd_queue.read().await;
+                debug!("Cmd queue length: {}", queue.len());
                 // for (job, priority) in queue.iter() {
                 //     debug!("Prio: {}, Job: {:?}", priority, job);
                 // }
             }
 
-            let queue_res = { self.msg_queue.write().await.pop() };
+            let queue_res = { self.cmd_queue.write().await.pop() };
             if let Some((mut job, prio)) = queue_res {
                 if job.retries >= MAX_RETRIES {
                     // break this loop, report error to other nodes
@@ -168,26 +159,33 @@ impl PeerSession {
                     // (or send event on a channel (to report error to other nodes), then sleep for a very long time, then try again?)
 
                     job.reporter
-                        .send(SendStatus::MaxRetriesReached(job.retries));
+                        .send(CtrlStatus::MaxRetriesReached(job.retries));
 
-                    break; // this means we will stop all sending to this peer!
+                    continue; // this means we will drop this cmd entirely!
                 }
-                if let Err(err) = self.link.send(job.msg_bytes.clone()).await {
-                    job.retries += 1;
-                    if err.is_local_close() {
-                        job.reporter.send(SendStatus::PeerLinkDropped);
-                        break; // this means we will stop all sending to this peer!
-                    } else {
-                        job.reporter
-                            .send(SendStatus::TransientError(format!("{:?}", err)));
-                        let _ = self.msg_queue.write().await.push(job, prio);
+                let clone = self.clone();
+                let _ = tokio::spawn(async move {
+                    match clone.processor.process_cmd(job.cmd.clone(), &job.id).await {
+                        Ok(cmds) => {
+                            job.reporter.send(CtrlStatus::Finished);
+                            clone.finished.increment(); // on success
+                                                        // todo: handle the watchers..
+                            let _watchers = clone.extend(cmds).await;
+                        }
+                        Err(err) => {
+                            job.retries += 1;
+                            job.reporter.send(CtrlStatus::Error(Arc::new(err)));
+                            let _ = clone.cmd_queue.write().await.push(job, prio);
+                        }
                     }
-                } else {
-                    job.reporter.send(SendStatus::Sent);
-                    self.sent.increment(); // on success
-                }
-
-                self.attempted.increment(); // both on fail and success
+                    clone.attempted.increment(); // both on fail and success
+                });
+                // trace!(
+                //     "{:?} {} cmd_id={}",
+                //     LogMarker::CmdHandlingSpawned,
+                //     cmd_display,
+                //     &job.id,
+                // );
             }
         }
     }
@@ -223,18 +221,15 @@ impl MsgThroughput {
 
 #[derive(Debug)]
 pub(crate) struct SendJob {
-    msg_id: MsgId,
-    #[debug(skip)]
-    msg_bytes: Bytes,
+    cmd: Cmd,
+    id: CmdId,
     retries: usize,
     reporter: StatusReporting,
 }
 
 impl PartialEq for SendJob {
     fn eq(&self, other: &Self) -> bool {
-        self.msg_id == other.msg_id
-            && self.msg_bytes == other.msg_bytes
-            && self.retries == other.retries
+        self.id == other.id
     }
 }
 
@@ -242,56 +237,57 @@ impl Eq for SendJob {}
 
 impl std::hash::Hash for SendJob {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.msg_id.hash(state);
-        self.msg_bytes.hash(state);
+        //self.cmd.hash(state);
+        self.id.hash(state);
         self.retries.hash(state);
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum SendStatus {
+pub(crate) enum CtrlStatus {
     Enqueued,
-    Sent,
-    PeerLinkDropped,
-    TransientError(String),
+    Finished,
+    Error(Arc<Error>),
     MaxRetriesReached(usize),
+    #[allow(unused)]
     WatcherDropped,
 }
 
 pub(crate) struct SendWatcher {
-    receiver: tokio::sync::watch::Receiver<SendStatus>,
+    receiver: tokio::sync::watch::Receiver<CtrlStatus>,
 }
 
 impl SendWatcher {
     /// Reads current status
     #[allow(unused)]
-    pub(crate) fn status(&self) -> SendStatus {
+    pub(crate) fn status(&self) -> CtrlStatus {
         self.receiver.borrow().clone()
     }
 
     /// Waits until a new status arrives.
-    pub(crate) async fn await_change(&mut self) -> SendStatus {
+    #[allow(unused)]
+    pub(crate) async fn await_change(&mut self) -> CtrlStatus {
         if self.receiver.changed().await.is_ok() {
             self.receiver.borrow_and_update().clone()
         } else {
-            SendStatus::WatcherDropped
+            CtrlStatus::WatcherDropped
         }
     }
 }
 
 #[derive(Debug)]
 struct StatusReporting {
-    sender: tokio::sync::watch::Sender<SendStatus>,
+    sender: tokio::sync::watch::Sender<CtrlStatus>,
 }
 
 impl StatusReporting {
-    fn send(&self, status: SendStatus) {
+    fn send(&self, status: CtrlStatus) {
         // todo: ok to drop error here?
         let _ = self.sender.send(status);
     }
 }
 
 fn status_watching() -> (SendWatcher, StatusReporting) {
-    let (sender, receiver) = tokio::sync::watch::channel(SendStatus::Enqueued);
+    let (sender, receiver) = tokio::sync::watch::channel(CtrlStatus::Enqueued);
     (SendWatcher { receiver }, StatusReporting { sender })
 }

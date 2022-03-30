@@ -181,7 +181,7 @@ impl Node {
 
         for (target, data_addresses) in send_list.into_iter() {
             cmds.push(Cmd::SignOutgoingSystemMsg {
-                msg: SystemMsg::NodeCmd(NodeCmd::SendReplicateDataAddress(data_addresses).clone()),
+                msg: SystemMsg::NodeCmd(NodeCmd::ReplicateDataAt(data_addresses).clone()),
                 dst: DstLocation::Node {
                     name: target,
                     section_pk,

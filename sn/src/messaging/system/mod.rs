@@ -200,3 +200,66 @@ pub enum SystemMsg {
         correlation_id: MsgId,
     },
 }
+
+// highest priority, since we must sort out membership first of all
+pub(crate) const DKG_MSG_PRIORITY: i32 = 10;
+// very high prio, since we must have correct contact details to the network
+pub(crate) const ANTIENTROPY_MSG_PRIORITY: i32 = 8;
+// high prio as recipient can't do anything until they've joined. Needs to be lower than DKG (or else no split)
+pub(crate) const JOIN_RESPONSE_PRIORITY: i32 = 6;
+// our joining to the network
+pub(crate) const JOIN_RELOCATE_MSG_PRIORITY: i32 = 4;
+// reporting dysfunction is somewhat critical, so not super low
+pub(crate) const DYSFUNCTION_MSG_PRIORITY: i32 = 2;
+// reporting backpressure isn't time critical, so fairly low
+pub(crate) const BACKPRESSURE_MSG_PRIORITY: i32 = 0;
+// not maintaining network structure, so can wait
+pub(crate) const NODE_DATA_MSG_PRIORITY: i32 = -6;
+
+impl SystemMsg {
+    /// The priority of the message, when handled by lower level comms.
+    pub fn priority(&self) -> i32 {
+        match self {
+            // DKG messages
+            SystemMsg::DkgStart { .. }
+            | SystemMsg::DkgSessionUnknown { .. }
+            | SystemMsg::DkgSessionInfo { .. }
+            | SystemMsg::DkgNotReady { .. }
+            | SystemMsg::DkgRetry { .. }
+            | SystemMsg::DkgMessage { .. }
+            | SystemMsg::DkgFailureObservation { .. }
+            | SystemMsg::DkgFailureAgreement(_) => DKG_MSG_PRIORITY,
+
+            // Inter-node comms for AE updates
+            SystemMsg::AntiEntropyRetry { .. }
+            | SystemMsg::AntiEntropyRedirect { .. }
+            | SystemMsg::AntiEntropyUpdate { .. }
+            | SystemMsg::AntiEntropyProbe(_) => ANTIENTROPY_MSG_PRIORITY,
+
+            // Join responses
+            SystemMsg::JoinResponse(_) | SystemMsg::JoinAsRelocatedResponse(_) => {
+                JOIN_RESPONSE_PRIORITY
+            }
+
+            // Inter-node comms for joining, relocating etc.
+            SystemMsg::Relocate(_)
+            | SystemMsg::JoinRequest(_)
+            | SystemMsg::JoinAsRelocatedRequest(_)
+            | SystemMsg::Propose { .. }
+            | SystemMsg::StartConnectivityTest(_) => JOIN_RELOCATE_MSG_PRIORITY,
+
+            // Inter-node comms for dysfunction detection
+            SystemMsg::NodeEvent(NodeEvent::SuspiciousNodesDetected(_)) => DYSFUNCTION_MSG_PRIORITY,
+
+            // Inter-node comms for backpressure
+            SystemMsg::BackPressure(_) => BACKPRESSURE_MSG_PRIORITY,
+
+            // Inter-node comms related to processing client requests
+            SystemMsg::NodeCmd(_)
+            | SystemMsg::NodeEvent(NodeEvent::CouldNotStoreData { .. })
+            | SystemMsg::NodeQuery(_)
+            | SystemMsg::NodeQueryResponse { .. }
+            | SystemMsg::NodeMsgError { .. } => NODE_DATA_MSG_PRIORITY,
+        }
+    }
+}

@@ -44,7 +44,7 @@ impl Node {
         let dst = DstLocation::EndUser(EndUser(target.name()));
 
         let (msg_kind, payload) = self.ed_sign_client_msg(&msg).await?;
-        let wire_msg = WireMsg::new_msg(MsgId::new(), payload, msg_kind, dst)?;
+        let wire_msg = WireMsg::new_msg(MsgId::new(), payload, msg_kind, msg.priority(), dst)?;
 
         let cmd = Cmd::SendMsg {
             recipients: vec![target],

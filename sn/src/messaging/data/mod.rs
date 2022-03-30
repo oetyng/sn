@@ -39,6 +39,11 @@ use std::{collections::BTreeSet, convert::TryFrom};
 use tiny_keccak::{Hasher, Sha3};
 use xor_name::XorName;
 
+// has payment throttle, but is not critical for network function
+pub(crate) const SERVICE_CMD_PRIORITY: i32 = -8;
+// has no throttle and is sent by clients, lowest prio
+pub(crate) const SERVICE_QUERY_PRIORITY: i32 = -10;
+
 /// Derivable Id of an operation. Query/Response should return the same id for simple tracking purposes.
 /// TODO: make uniquer per requester for some operations
 pub type OperationId = [u8; 32];
@@ -122,6 +127,15 @@ impl ServiceMsg {
             Self::Cmd(cmd) => Some(cmd.dst_name()),
             Self::Query(query) => Some(query.dst_name()),
             _ => None,
+        }
+    }
+
+    /// The priority of the message, when handled by lower level comms.
+    pub fn priority(&self) -> i32 {
+        match self {
+            // Client <-> node service comms
+            ServiceMsg::Cmd(_) => SERVICE_CMD_PRIORITY,
+            _ => SERVICE_QUERY_PRIORITY,
         }
     }
 }

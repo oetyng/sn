@@ -17,8 +17,10 @@ use system::Process;
 use tokio::time::MissedTickBehavior;
 use tracing::trace;
 
+#[allow(unused)]
 const LOG_INTERVAL: Duration = std::time::Duration::from_secs(60);
 
+#[allow(unused)]
 pub(super) async fn run_system_logger(ctx: LogCtx, print_resources_usage: bool) {
     let mut system = System::new_all();
     initial_log(&mut system, &ctx).await;
@@ -34,6 +36,7 @@ pub(super) async fn run_system_logger(ctx: LogCtx, print_resources_usage: bool) 
     });
 }
 
+#[allow(unused)]
 async fn initial_log(system: &mut System, ctx: &LogCtx) {
     let prefix: &str = &format!("{}", ctx.prefix().await.name());
     let os_name: &str = &fmt(system.name());
@@ -43,6 +46,7 @@ async fn initial_log(system: &mut System, ctx: &LogCtx) {
     trace!(prefix, os_name, kernel_version, os_version, host_name);
 }
 
+#[allow(unused)]
 fn fmt(string: Option<String>) -> String {
     string.unwrap_or_else(|| "Unknown".to_string())
 }

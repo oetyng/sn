@@ -66,10 +66,11 @@ impl WireMsg {
         msg_id: MsgId,
         payload: Bytes,
         msg_kind: MsgKind,
+        priority: i32,
         dst_location: DstLocation,
     ) -> Result<Self> {
         Ok(Self {
-            header: WireMsgHeader::new(msg_id, msg_kind, dst_location),
+            header: WireMsgHeader::new(msg_id, msg_kind, priority, dst_location),
             payload,
             #[cfg(feature = "test-utils")]
             payload_debug: None,
@@ -182,19 +183,34 @@ impl WireMsg {
         self.header.msg_envelope.msg_id
     }
 
-    /// Update the message ID
-    pub fn set_msg_id(&mut self, msg_id: MsgId) {
-        self.header.msg_envelope.msg_id = msg_id;
-    }
-
     /// Return the kind of this message
     pub fn msg_kind(&self) -> &MsgKind {
         &self.header.msg_envelope.msg_kind
     }
 
+    /// Return the priority of this message
+    pub fn priority(&self) -> i32 {
+        self.header.msg_envelope.priority
+    }
+
     /// Return the destination section PublicKey for this message
     pub fn dst_section_pk(&self) -> Option<BlsPublicKey> {
         self.header.msg_envelope.dst_location.section_pk()
+    }
+
+    /// Return the source section PublicKey for this
+    /// message if it's a NodeMsg
+    pub fn src_section_pk(&self) -> Option<BlsPublicKey> {
+        match &self.header.msg_envelope.msg_kind {
+            MsgKind::NodeAuthMsg(node_signed) => Some(node_signed.section_pk),
+            MsgKind::NodeBlsShareAuthMsg(bls_share_signed) => Some(bls_share_signed.section_pk),
+            _ => None,
+        }
+    }
+
+    /// Update the message ID
+    pub fn set_msg_id(&mut self, msg_id: MsgId) {
+        self.header.msg_envelope.msg_id = msg_id;
     }
 
     /// Update the destination section PublicKey for this message
@@ -210,16 +226,6 @@ impl WireMsg {
     /// Return the destination for this message
     pub fn dst_location(&self) -> &DstLocation {
         &self.header.msg_envelope.dst_location
-    }
-
-    /// Return the source section PublicKey for this
-    /// message if it's a NodeMsg
-    pub fn src_section_pk(&self) -> Option<BlsPublicKey> {
-        match &self.header.msg_envelope.msg_kind {
-            MsgKind::NodeAuthMsg(node_signed) => Some(node_signed.section_pk),
-            MsgKind::NodeBlsShareAuthMsg(bls_share_signed) => Some(bls_share_signed.section_pk),
-            _ => None,
-        }
     }
 
     /// Convenience function which creates a temporary WireMsg from the provided
@@ -275,18 +281,18 @@ mod tests {
         let msg_id = MsgId::new();
         let pk = crate::types::PublicKey::Bls(dst_section_pk);
 
-        let node_msg = SystemMsg::NodeCmd(NodeCmd::RecordStorageLevel {
+        let msg = SystemMsg::NodeCmd(NodeCmd::RecordStorageLevel {
             node_id: pk,
             section: pk.into(),
             level: StorageLevel::zero(),
         });
 
-        let payload = WireMsg::serialize_msg_payload(&node_msg)?;
+        let payload = WireMsg::serialize_msg_payload(&msg)?;
         let node_auth = NodeAuth::authorize(src_section_pk, &src_node_keypair, &payload);
 
         let msg_kind = MsgKind::NodeAuthMsg(node_auth.clone().into_inner());
 
-        let wire_msg = WireMsg::new_msg(msg_id, payload, msg_kind, dst_location)?;
+        let wire_msg = WireMsg::new_msg(msg_id, payload, msg_kind, msg.priority(), dst_location)?;
         let serialized = wire_msg.serialize()?;
 
         // test deserialisation of header
@@ -304,7 +310,7 @@ mod tests {
                 msg_id: wire_msg.msg_id(),
                 msg_authority: NodeMsgAuthority::Node(node_auth),
                 dst_location,
-                msg: node_msg,
+                msg,
             }
         );
 
@@ -328,6 +334,7 @@ mod tests {
         let client_msg =
             ServiceMsg::Query(DataQuery::GetChunk(ChunkAddress(xor_name::rand::random())));
 
+        let priority = client_msg.priority();
         let payload = WireMsg::serialize_msg_payload(&client_msg)?;
         let auth = ServiceAuth {
             public_key: src_client_keypair.public_key(),
@@ -337,7 +344,7 @@ mod tests {
 
         let msg_kind = MsgKind::ServiceMsg(auth);
 
-        let wire_msg = WireMsg::new_msg(msg_id, payload, msg_kind, dst_location)?;
+        let wire_msg = WireMsg::new_msg(msg_id, payload, msg_kind, priority, dst_location)?;
         let serialized = wire_msg.serialize()?;
 
         // test deserialisation of header
