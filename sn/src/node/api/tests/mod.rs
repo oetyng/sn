@@ -21,8 +21,8 @@ use crate::messaging::{
 };
 use crate::node::{
     core::{
-        relocation_check, ChurnId, MsgEvent, Node, Proposal, RESOURCE_PROOF_DATA_SIZE,
-        RESOURCE_PROOF_DIFFICULTY,
+        relocation_check, ChurnId, Measurements, MsgEvent, Node, Proposal,
+        RESOURCE_PROOF_DATA_SIZE, RESOURCE_PROOF_DIFFICULTY,
     },
     create_test_max_capacity_and_root_storage,
     dkg::test_utils::{prove, section_signed},
@@ -1400,7 +1400,13 @@ fn threshold() -> usize {
 
 pub(crate) async fn create_comm() -> Result<Comm> {
     let (tx, _rx) = mpsc::channel(TEST_EVENT_CHANNEL_SIZE);
-    Ok(Comm::first_node((Ipv4Addr::LOCALHOST, 0).into(), Default::default(), tx).await?)
+    Ok(Comm::first_node(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        Default::default(),
+        Measurements::new(),
+        tx,
+    )
+    .await?)
 }
 
 // // Generate random SectionAuthorityProvider and the corresponding Nodes.

@@ -13,6 +13,7 @@ mod connectivity;
 mod data;
 mod delivery_group;
 mod messaging;
+mod monitoring;
 mod proposal;
 mod relocation;
 mod split_barrier;
@@ -20,6 +21,7 @@ mod split_barrier;
 pub(crate) use bootstrap::{join_network, JoiningAsRelocated};
 pub(crate) use comm::{Comm, DeliveryStatus, MsgEvent};
 pub(crate) use data::MIN_LEVEL_WHEN_FULL;
+pub(crate) use monitoring::Measurements;
 pub(crate) use proposal::Proposal;
 #[cfg(test)]
 pub(crate) use relocation::{check as relocation_check, ChurnId};

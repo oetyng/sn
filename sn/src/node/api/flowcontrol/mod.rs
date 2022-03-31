@@ -12,22 +12,19 @@ mod dispatcher;
 use self::cmd_ctrl::CmdCtrl;
 use self::dispatcher::{CmdProcessor, Dispatcher};
 
-use crate::node::api::cmds::Cmd;
-use crate::node::core::{MsgEvent, Node};
-use crate::node::{EventStream, Result};
+use crate::node::{
+    api::cmds::Cmd,
+    core::{Measurements, MsgEvent, Node},
+    EventStream, Result,
+};
 use crate::types::log_markers::LogMarker;
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio::task;
-use tokio::time::MissedTickBehavior;
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use tokio::{sync::mpsc, task, time::MissedTickBehavior};
 
 const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 const LINK_CLEANUP_INTERVAL: Duration = Duration::from_secs(120);
 const DYSFUNCTION_CHECK_INTERVAL: Duration = Duration::from_secs(60);
-
 const EVENT_CHANNEL_SIZE: usize = 2000;
 
 #[derive(Clone)]
@@ -39,11 +36,16 @@ pub(crate) struct FlowControl {
 impl FlowControl {
     pub(crate) fn new(
         node: Arc<Node>,
+        monitoring: Measurements,
         incoming_conns: mpsc::Receiver<MsgEvent>,
     ) -> (Self, EventStream) {
         let (event_sender, event_receiver) = mpsc::channel(EVENT_CHANNEL_SIZE);
         let dispatcher = Arc::new(Dispatcher::new(node));
-        let cmd_ctrl = CmdCtrl::new(CmdProcessor::new(dispatcher.clone()), event_sender);
+        let cmd_ctrl = CmdCtrl::new(
+            CmdProcessor::new(dispatcher.clone()),
+            monitoring,
+            event_sender,
+        );
 
         dispatcher.clone().write_prefixmap_to_disk();
 

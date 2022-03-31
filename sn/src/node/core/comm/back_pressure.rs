@@ -6,11 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-mod load_monitoring;
-
-use crate::types::Peer;
-
-use self::load_monitoring::{LoadMonitoring, INITIAL_MSGS_PER_S};
+use crate::{node::core::Measurements, types::Peer};
 
 use itertools::Itertools;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -19,29 +15,29 @@ use tokio::{sync::RwLock, time::Instant};
 const MIN_REPORT_INTERVAL: Duration = Duration::from_secs(60);
 const REPORT_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
-const SANITY_MAX_PER_S_AND_PEER: f64 = INITIAL_MSGS_PER_S;
+const SANITY_MAX_PER_S_AND_PEER: f64 = 100.0;
 const SANITY_MIN_PER_S_AND_PEER: f64 = 1.0; // 1 every s
 
 type OutgoingReports = BTreeMap<Peer, (Instant, f64)>;
 
 #[derive(Clone)]
 pub(crate) struct BackPressure {
-    monitoring: LoadMonitoring,
+    monitoring: Measurements,
     our_reports: Arc<RwLock<OutgoingReports>>,
     last_eviction: Arc<RwLock<Instant>>,
 }
 
 impl BackPressure {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(monitoring: Measurements) -> Self {
         Self {
-            monitoring: LoadMonitoring::new(),
+            monitoring,
             our_reports: Arc::new(RwLock::new(OutgoingReports::new())),
             last_eviction: Arc::new(RwLock::new(Instant::now())),
         }
     }
 
     pub(crate) fn count_msg(&self) {
-        self.monitoring.count_msg();
+        self.monitoring.increment_msgs();
     }
 
     /// Sent to nodes calling us, if the value has changed significantly.
@@ -73,7 +69,7 @@ impl BackPressure {
 
         // then measure stuff
 
-        let msgs_per_s = 10.0 * self.monitoring.msgs_per_s().await;
+        let msgs_per_s = 10.0 * self.monitoring.max_msgs_per_s().await;
         let num_callers = { self.our_reports.read().await.len() as f64 };
 
         // avoid divide by 0 errors

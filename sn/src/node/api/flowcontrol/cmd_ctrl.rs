@@ -13,6 +13,7 @@ use crate::node::{
         cmds::{Cmd, CmdJob},
         event::CmdProcessing,
     },
+    core::Measurements,
     Error, Event, Result,
 };
 
@@ -34,7 +35,6 @@ use tokio::{
 type Priority = i32;
 
 const MAX_RETRIES: usize = 1; // drops on first error..
-const DEFAULT_DESIRED_RATE: f64 = 50.0; // 50 msgs / s
 const SLEEP_TIME: Duration = Duration::from_millis(20);
 
 const ORDER: Ordering = Ordering::SeqCst;
@@ -42,9 +42,9 @@ const ORDER: Ordering = Ordering::SeqCst;
 #[derive(Clone)]
 pub(crate) struct CmdCtrl {
     cmd_queue: Arc<RwLock<PriorityQueue<EnqueuedJob, Priority>>>,
-    finished: MsgThroughput,
+    //finished: MsgThroughput,
     attempted: MsgThroughput,
-    desired_rate: Arc<RwLock<f64>>, // cmds per s
+    monitoring: Measurements,
     stopped: Arc<RwLock<bool>>,
     processor: CmdProcessor,
     id_counter: Arc<AtomicU64>,
@@ -52,12 +52,16 @@ pub(crate) struct CmdCtrl {
 }
 
 impl CmdCtrl {
-    pub(crate) fn new(processor: CmdProcessor, event_sender: mpsc::Sender<Event>) -> Self {
+    pub(crate) fn new(
+        processor: CmdProcessor,
+        monitoring: Measurements,
+        event_sender: mpsc::Sender<Event>,
+    ) -> Self {
         let session = Self {
             cmd_queue: Arc::new(RwLock::new(PriorityQueue::new())),
-            finished: MsgThroughput::default(),
+            //finished: MsgThroughput::default(),
             attempted: MsgThroughput::default(),
-            desired_rate: Arc::new(RwLock::new(DEFAULT_DESIRED_RATE)),
+            monitoring,
             stopped: Arc::new(RwLock::new(false)),
             processor,
             id_counter: Arc::new(AtomicU64::new(0)),
@@ -70,15 +74,15 @@ impl CmdCtrl {
         session
     }
 
-    #[allow(unused)]
-    pub(crate) async fn throughput(&self) -> f64 {
-        self.finished.value()
-    }
+    // #[allow(unused)]
+    // pub(crate) async fn throughput(&self) -> f64 {
+    //     self.finished.value()
+    // }
 
-    #[allow(unused)]
-    pub(crate) async fn success_ratio(&self) -> f64 {
-        self.finished.value() / self.attempted.value()
-    }
+    // #[allow(unused)]
+    // pub(crate) async fn success_ratio(&self) -> f64 {
+    //     self.finished.value() / self.attempted.value()
+    // }
 
     pub(crate) async fn extend(&self, cmds: Vec<Cmd>) -> Vec<Result<SendWatcher>> {
         let mut results = vec![];
@@ -113,11 +117,6 @@ impl CmdCtrl {
         Ok(watcher)
     }
 
-    #[allow(unused)]
-    pub(crate) async fn update_send_rate(&self, desired_rate: f64) {
-        *self.desired_rate.write().await = desired_rate;
-    }
-
     // consume self
     // NB that clones could still exist, however they would be in the disconnected state
     // if only accessing via session map (as intended)
@@ -144,7 +143,7 @@ impl CmdCtrl {
                 break;
             }
 
-            let expected_rate = { *self.desired_rate.read().await };
+            let expected_rate = self.monitoring.max_cmds_per_s().await;
             let actual_rate = self.attempted.value();
             if actual_rate > expected_rate {
                 let diff = actual_rate - expected_rate;
@@ -160,9 +159,6 @@ impl CmdCtrl {
             {
                 let queue = self.cmd_queue.read().await;
                 debug!("Cmd queue length: {}", queue.len());
-                // for (job, priority) in queue.iter() {
-                //     debug!("Prio: {}, Job: {:?}", priority, job);
-                // }
             }
 
             let queue_res = { self.cmd_queue.write().await.pop() };
@@ -204,7 +200,8 @@ impl CmdCtrl {
                     {
                         Ok(cmds) => {
                             enqueued.reporter.send(CtrlStatus::Finished);
-                            clone.finished.increment(); // on success
+
+                            clone.monitoring.increment_cmds();
 
                             // todo: handle the watchers..
                             // todo: use parent cmd prio? factor for that q: are the subcmds always _part of the completion_ of the parent cmd, or can they also be unrelated to that?

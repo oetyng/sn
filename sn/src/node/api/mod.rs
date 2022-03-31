@@ -53,6 +53,8 @@ use std::{
 use tokio::sync::mpsc;
 use xor_name::{Prefix, XorName};
 
+use super::core::Measurements;
+
 /// Interface for sending and receiving messages to and from other nodes, in the role of a full
 /// routing node.
 ///
@@ -144,6 +146,8 @@ impl NodeApi {
             .local_addr
             .unwrap_or_else(|| SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)));
 
+        let monitoring = Measurements::new();
+
         let node = if config.is_first() {
             // Genesis node having a fix age of 255.
             let keypair = ed25519::gen_keypair(&Prefix::default().range_inclusive(), 255);
@@ -158,6 +162,7 @@ impl NodeApi {
             let comm = Comm::first_node(
                 local_addr,
                 config.network_config().clone(),
+                monitoring.clone(),
                 connection_event_tx,
             )
             .await?;
@@ -225,6 +230,7 @@ impl NodeApi {
                     .collect_vec()
                     .as_slice(),
                 config.network_config().clone(),
+                monitoring.clone(),
                 connection_event_tx,
             )
             .await?;
@@ -264,7 +270,8 @@ impl NodeApi {
         };
 
         let node = Arc::new(node);
-        let (flow_ctrl, event_stream) = FlowControl::new(node.clone(), connection_event_rx);
+        let (flow_ctrl, event_stream) =
+            FlowControl::new(node.clone(), monitoring, connection_event_rx);
         let api = Self { node, flow_ctrl };
 
         Ok((

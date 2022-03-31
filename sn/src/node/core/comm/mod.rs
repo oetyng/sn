@@ -17,8 +17,10 @@ use self::listener::{ListenerEvent, MsgListener};
 use self::peer_session::{PeerSession, SendWatcher};
 
 use crate::messaging::{MsgId, WireMsg};
-use crate::node::core::comm::peer_session::SendStatus;
-use crate::node::error::{Error, Result};
+use crate::node::{
+    core::{comm::peer_session::SendStatus, Measurements},
+    error::{Error, Result},
+};
 use crate::types::Peer;
 
 use bytes::Bytes;
@@ -49,6 +51,7 @@ impl Comm {
     pub(crate) async fn first_node(
         local_addr: SocketAddr,
         config: qp2p::Config,
+        monitoring: Measurements,
         receive_msg: mpsc::Sender<MsgEvent>,
     ) -> Result<Self> {
         // Doesn't bootstrap, just creates an endpoint to listen to
@@ -56,7 +59,7 @@ impl Comm {
         let (our_endpoint, incoming_connections, _) =
             Endpoint::new_peer(local_addr, Default::default(), config).await?;
 
-        let (comm, _) = setup_comms(our_endpoint, incoming_connections, receive_msg);
+        let (comm, _) = setup_comms(our_endpoint, incoming_connections, monitoring, receive_msg);
 
         Ok(comm)
     }
@@ -66,13 +69,15 @@ impl Comm {
         local_addr: SocketAddr,
         bootstrap_nodes: &[SocketAddr],
         config: qp2p::Config,
+        monitoring: Measurements,
         receive_msg: mpsc::Sender<MsgEvent>,
     ) -> Result<(Self, SocketAddr)> {
         // Bootstrap to the network returning the connection to a node.
         let (our_endpoint, incoming_connections, bootstrap_node) =
             Endpoint::new_peer(local_addr, bootstrap_nodes, config).await?;
 
-        let (comm, msg_listener) = setup_comms(our_endpoint, incoming_connections, receive_msg);
+        let (comm, msg_listener) =
+            setup_comms(our_endpoint, incoming_connections, monitoring, receive_msg);
 
         let (connection, incoming_msgs) = bootstrap_node.ok_or(Error::BootstrapFailed)?;
         let remote_address = connection.remote_address();
@@ -513,9 +518,10 @@ impl Comm {
 fn setup_comms(
     our_endpoint: Endpoint,
     incoming_connections: IncomingConnections,
+    monitoring: Measurements,
     receive_msg: mpsc::Sender<MsgEvent>,
 ) -> (Comm, MsgListener) {
-    let (comm, msg_listener) = setup(our_endpoint, receive_msg);
+    let (comm, msg_listener) = setup(our_endpoint, monitoring, receive_msg);
 
     listen(msg_listener.clone(), incoming_connections);
 
@@ -523,8 +529,12 @@ fn setup_comms(
 }
 
 #[tracing::instrument(skip_all)]
-fn setup(our_endpoint: Endpoint, receive_msg: mpsc::Sender<MsgEvent>) -> (Comm, MsgListener) {
-    let back_pressure = BackPressure::new();
+fn setup(
+    our_endpoint: Endpoint,
+    monitoring: Measurements,
+    receive_msg: mpsc::Sender<MsgEvent>,
+) -> (Comm, MsgListener) {
+    let back_pressure = BackPressure::new(monitoring);
     let (add_connection, conn_receiver) = mpsc::channel(100);
     let (count_msg, msg_counter) = mpsc::channel(1000);
 
@@ -618,7 +628,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn successful_send() -> Result<()> {
         let (tx, _rx) = mpsc::channel(1);
-        let comm = Comm::first_node(local_addr(), Config::default(), tx).await?;
+        let comm =
+            Comm::first_node(local_addr(), Config::default(), Measurements::new(), tx).await?;
 
         let (peer0, mut rx0) = new_peer().await?;
         let (peer1, mut rx1) = new_peer().await?;
@@ -645,7 +656,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn successful_send_to_subset() -> Result<()> {
         let (tx, _rx) = mpsc::channel(1);
-        let comm = Comm::first_node(local_addr(), Config::default(), tx).await?;
+        let comm =
+            Comm::first_node(local_addr(), Config::default(), Measurements::new(), tx).await?;
 
         let (peer0, mut rx0) = new_peer().await?;
         let (peer1, mut rx1) = new_peer().await?;
@@ -679,6 +691,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(1)),
                 ..Config::default()
             },
+            Measurements::new(),
             tx,
         )
         .await?;
@@ -704,6 +717,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(1)),
                 ..Config::default()
             },
+            Measurements::new(),
             tx,
         )
         .await?;
@@ -731,6 +745,7 @@ mod tests {
                 idle_timeout: Some(Duration::from_millis(1)),
                 ..Config::default()
             },
+            Measurements::new(),
             tx,
         )
         .await?;
@@ -754,7 +769,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn send_after_reconnect() -> Result<()> {
         let (tx, _rx) = mpsc::channel(1);
-        let send_comm = Comm::first_node(local_addr(), Config::default(), tx).await?;
+        let send_comm =
+            Comm::first_node(local_addr(), Config::default(), Measurements::new(), tx).await?;
 
         let (recv_endpoint, mut incoming_connections, _) =
             Endpoint::new_peer(local_addr(), &[], Config::default()).await?;
@@ -805,11 +821,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn incoming_connection_lost() -> Result<()> {
         let (tx, mut rx0) = mpsc::channel(1);
-        let comm0 = Comm::first_node(local_addr(), Config::default(), tx).await?;
+        let comm0 =
+            Comm::first_node(local_addr(), Config::default(), Measurements::new(), tx).await?;
         let addr0 = comm0.our_connection_info();
 
         let (tx, _rx) = mpsc::channel(1);
-        let comm1 = Comm::first_node(local_addr(), Config::default(), tx).await?;
+        let comm1 =
+            Comm::first_node(local_addr(), Config::default(), Measurements::new(), tx).await?;
 
         // Send a message to establish the connection
         let status = comm1
