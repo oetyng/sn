@@ -15,14 +15,15 @@ use self::load_sampling::LoadSampling;
 use self::sampling::Sampling;
 
 use std::time::Duration;
+use sysinfo::LoadAvg;
 use tokio::time::MissedTickBehavior;
 
-const INITIAL_MSGS_PER_S: f64 = 100.0;
-const INITIAL_CMDS_PER_S: f64 = 50.0;
+const INITIAL_MSGS_PER_S: f64 = 500.0;
+const INITIAL_CMDS_PER_S: f64 = 250.0;
 
-const SAMPLING_INTERVAL_ONE: u8 = 1;
-const SAMPLING_INTERVAL_FIVE: u8 = 5;
-const SAMPLING_INTERVAL_FIFTEEN: u8 = 15;
+const INTERVAL_ONE_MINUTE: u8 = 1;
+const INTERVAL_FIVE_MINUTES: u8 = 5;
+const INTERVAL_FIFTEEN_MINUTES: u8 = 15;
 
 // Used to measure local activity per s, specifically cmds handled, and msgs received.
 
@@ -36,9 +37,9 @@ pub(crate) struct Measurements {
 impl Measurements {
     pub(crate) fn new() -> Self {
         let intervals = btree_set![
-            SAMPLING_INTERVAL_ONE,
-            SAMPLING_INTERVAL_FIVE,
-            SAMPLING_INTERVAL_FIFTEEN
+            INTERVAL_ONE_MINUTE,
+            INTERVAL_FIVE_MINUTES,
+            INTERVAL_FIFTEEN_MINUTES
         ];
 
         let instance = Self {
@@ -73,36 +74,39 @@ impl Measurements {
     }
 
     async fn run_sampler(&self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(SAMPLING_INTERVAL_ONE as u64));
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(60 * INTERVAL_ONE_MINUTE as u64));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut count: u8 = 0;
 
         loop {
             let _instant = interval.tick().await;
             self.load_sampling.sample().await;
+            let load = &self.load_sampling.value().await;
+            count += 1;
 
-            if count == SAMPLING_INTERVAL_FIFTEEN {
+            debug!("Load sample {:?}", load);
+
+            if count == INTERVAL_FIFTEEN_MINUTES {
                 count = 0; // reset count
                            // do 15, 5 and 1 min measurements
-                self.measure(SAMPLING_INTERVAL_ONE).await;
-                self.measure(SAMPLING_INTERVAL_FIVE).await;
-                self.measure(SAMPLING_INTERVAL_FIFTEEN).await;
-            } else if count == SAMPLING_INTERVAL_FIVE {
+                self.measure(INTERVAL_ONE_MINUTE, load).await;
+                self.measure(INTERVAL_FIVE_MINUTES, load).await;
+                self.measure(INTERVAL_FIFTEEN_MINUTES, load).await;
+            } else if count == INTERVAL_FIVE_MINUTES {
                 // do 5 and 1 min measurements
-                self.measure(SAMPLING_INTERVAL_ONE).await;
-                self.measure(SAMPLING_INTERVAL_FIVE).await;
+                self.measure(INTERVAL_ONE_MINUTE, load).await;
+                self.measure(INTERVAL_FIVE_MINUTES, load).await;
             } else {
                 // on every iter
                 // do 1 min measurements
-                self.measure(SAMPLING_INTERVAL_ONE).await;
+                self.measure(INTERVAL_ONE_MINUTE, load).await;
             }
         }
     }
 
-    async fn measure(&self, period: u8) {
-        let load = self.load_sampling.value().await;
-        debug!("Load sample {:?} (for period {:?} min)", load, period);
-        self.cmd_sampling.measure(period, &load).await;
-        self.msg_sampling.measure(period, &load).await;
+    async fn measure(&self, period: u8, load: &LoadAvg) {
+        self.cmd_sampling.measure(period, load).await;
+        self.msg_sampling.measure(period, load).await;
     }
 }

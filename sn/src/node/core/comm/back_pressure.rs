@@ -69,7 +69,7 @@ impl BackPressure {
 
         // then measure stuff
 
-        let msgs_per_s = 10.0 * self.monitoring.max_msgs_per_s().await;
+        let msgs_per_s = self.monitoring.max_msgs_per_s().await;
         let num_callers = { self.our_reports.read().await.len() as f64 };
 
         // avoid divide by 0 errors

@@ -44,9 +44,10 @@ impl LoadSampling {
 fn normalize(load: LoadAvg) -> LoadAvg {
     // Normalize the reading (e.g. `load=4` when `cores=4` => `normalized_load=1`)
     let cores = num_cpus::get_physical() as f64;
+    debug!("num physical cores: {}", cores);
     LoadAvg {
-        one: load.one / cores,
-        five: load.five / cores,
-        fifteen: load.fifteen / cores,
+        one: 100.0 * f64::max(0.2, load.one) / cores,
+        five: 100.0 * f64::max(0.2, load.five) / cores,
+        fifteen: 100.0 * f64::max(0.2, load.fifteen) / cores,
     }
 }

@@ -77,15 +77,14 @@ impl std::fmt::Display for CmdProcessing {
         match self {
             CmdProcessing::Started { job, time } => {
                 let cmd = job.cmd();
-                let queued_for = job
-                    .time()
-                    .duration_since(*time)
+                let queued_for = time
+                    .duration_since(job.time())
                     .unwrap_or_default()
-                    .as_nanos();
+                    .as_millis();
                 let time: DateTime<Utc> = (*time).into();
                 write!(
                     f,
-                    "{}: Started id: {}, prio: {}, queued for {} ns. Cmd: {}",
+                    "{}: Started id: {}, prio: {}, queued for {} ms. Cmd: {}",
                     time.to_rfc3339(),
                     job.id(),
                     job.priority(),

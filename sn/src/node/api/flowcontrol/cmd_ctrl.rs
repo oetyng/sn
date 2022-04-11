@@ -59,7 +59,6 @@ impl CmdCtrl {
     ) -> Self {
         let session = Self {
             cmd_queue: Arc::new(RwLock::new(PriorityQueue::new())),
-            //finished: MsgThroughput::default(),
             attempted: MsgThroughput::default(),
             monitoring,
             stopped: Arc::new(RwLock::new(false)),
@@ -73,16 +72,6 @@ impl CmdCtrl {
 
         session
     }
-
-    // #[allow(unused)]
-    // pub(crate) async fn throughput(&self) -> f64 {
-    //     self.finished.value()
-    // }
-
-    // #[allow(unused)]
-    // pub(crate) async fn success_ratio(&self) -> f64 {
-    //     self.finished.value() / self.attempted.value()
-    // }
 
     pub(crate) async fn extend(&self, cmds: Vec<Cmd>) -> Vec<Result<SendWatcher>> {
         let mut results = vec![];

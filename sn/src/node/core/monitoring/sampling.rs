@@ -16,11 +16,11 @@ use std::{
 use sysinfo::LoadAvg;
 use tokio::sync::RwLock;
 
-const SAMPLING_INTERVAL_ONE: u8 = 1;
-const SAMPLING_INTERVAL_FIVE: u8 = 5;
-const SAMPLING_INTERVAL_FIFTEEN: u8 = 15;
+const INTERVAL_ONE_MINUTE: u8 = 1;
+const INTERVAL_FIVE_MINUTES: u8 = 5;
+const INTERVAL_FIFTEEN_MINUTES: u8 = 15;
 
-const MAX_CPU_LOAD: f64 = 0.8; // unit: percent
+const MAX_CPU_LOAD: f64 = 80.0; // unit: percent
 
 const ORDER: Ordering = Ordering::SeqCst;
 
@@ -78,11 +78,11 @@ impl Sampling {
 
             // unit: percent-seconds per event
             // (percent-seconds per [period] / events per [period] => percent-seconds per event)
-            let load_per_event = if period == SAMPLING_INTERVAL_ONE {
+            let load_per_event = if period == INTERVAL_ONE_MINUTE {
                 load.one / event_count
-            } else if period == SAMPLING_INTERVAL_FIVE {
+            } else if period == INTERVAL_FIVE_MINUTES {
                 load.five / event_count
-            } else if period == SAMPLING_INTERVAL_FIFTEEN {
+            } else if period == INTERVAL_FIFTEEN_MINUTES {
                 load.fifteen / event_count
             } else {
                 self.default_load_per_event
