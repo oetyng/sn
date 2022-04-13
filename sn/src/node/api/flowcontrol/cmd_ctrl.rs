@@ -190,7 +190,7 @@ impl CmdCtrl {
                         Ok(cmds) => {
                             enqueued.reporter.send(CtrlStatus::Finished);
 
-                            clone.monitoring.increment_cmds();
+                            clone.monitoring.increment_cmds().await;
 
                             // todo: handle the watchers..
                             // todo: use parent cmd prio? factor for that q: are the subcmds always _part of the completion_ of the parent cmd, or can they also be unrelated to that?

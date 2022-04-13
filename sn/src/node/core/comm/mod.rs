@@ -547,7 +547,7 @@ fn setup(
         sessions: Arc::new(RwLock::new(BTreeMap::new())),
     };
 
-    let _ = task::spawn(count_msgs(back_pressure, msg_counter));
+    let _ = task::spawn(async move { count_msgs(back_pressure, msg_counter).await });
     let _ = task::spawn(receive_conns(comm.clone(), conn_receiver));
 
     (comm, msg_listener)
@@ -557,7 +557,7 @@ fn setup(
 async fn count_msgs(back_pressure: BackPressure, mut msg_counter: mpsc::Receiver<()>) {
     debug!("Entered msg counting listener loop.");
     while let Some(()) = msg_counter.recv().await {
-        back_pressure.count_msg();
+        back_pressure.count_msg().await;
     }
     debug!("Exited msg counting listener loop..!");
 }

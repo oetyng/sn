@@ -14,18 +14,23 @@ use tokio::sync::RwLock;
 pub(super) struct LoadSampling {
     system: Arc<RwLock<System>>,
     load_sample: Arc<RwLock<LoadAvg>>,
+    cores: usize,
 }
 
 impl LoadSampling {
     pub(super) fn new() -> Self {
+        let cores = num_cpus::get_physical();
+        debug!("num physical cores: {}", cores);
+
         let mut system = System::new_with_specifics(RefreshKind::new());
         system.refresh_cpu();
 
-        let load_sample = Arc::new(RwLock::new(normalize(system.load_average())));
+        let load_sample = Arc::new(RwLock::new(normalize(system.load_average(), cores)));
 
         Self {
             system: Arc::new(RwLock::new(system)),
             load_sample,
+            cores,
         }
     }
 
@@ -33,7 +38,8 @@ impl LoadSampling {
         {
             self.system.write().await.refresh_cpu();
         }
-        *self.load_sample.write().await = normalize(self.system.read().await.load_average());
+        *self.load_sample.write().await =
+            normalize(self.system.read().await.load_average(), self.cores);
     }
 
     pub(super) async fn value(&self) -> LoadAvg {
@@ -41,10 +47,9 @@ impl LoadSampling {
     }
 }
 
-fn normalize(load: LoadAvg) -> LoadAvg {
+fn normalize(load: LoadAvg, cores: usize) -> LoadAvg {
     // Normalize the reading (e.g. `load=4` when `cores=4` => `normalized_load=1`)
-    let cores = num_cpus::get_physical() as f64;
-    debug!("num physical cores: {}", cores);
+    let cores = cores as f64;
     LoadAvg {
         one: 100.0 * f64::max(0.2, load.one) / cores,
         five: 100.0 * f64::max(0.2, load.five) / cores,

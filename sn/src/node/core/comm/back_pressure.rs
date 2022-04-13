@@ -36,8 +36,8 @@ impl BackPressure {
         }
     }
 
-    pub(crate) fn count_msg(&self) {
-        self.monitoring.increment_msgs();
+    pub(crate) async fn count_msg(&self) {
+        self.monitoring.increment_msgs().await;
     }
 
     /// Sent to nodes calling us, if the value has changed significantly.
