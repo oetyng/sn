@@ -199,7 +199,7 @@ impl Safe {
             let files_map_for_path = files::file_map_for_path(files_map, &path).map_err(|e| {
                 Error::ContentError(format!(
                     "Failed to obtain file map for path: {}, on FileContainer at: {}, because: {}",
-                    &path, input_url, e
+                    &path, input_url, e,
                 ))
             })?;
 
