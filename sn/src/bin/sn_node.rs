@@ -30,7 +30,7 @@
 use color_eyre::{Section, SectionExt};
 use eyre::{eyre, Result, WrapErr};
 use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
-use safe_network::node::{add_connection_info, set_connection_info, Config, Error, Event, NodeApi};
+use safe_network::node::{add_connection_info, set_connection_info, Config, Error, NodeApi};
 
 #[cfg(not(feature = "tokio-console"))]
 use safe_network::LogFormatter;
@@ -40,7 +40,7 @@ use std::{io::Write, process::exit};
 use structopt::{clap, StructOpt};
 use tokio::sync::RwLockReadGuard;
 use tokio::time::{sleep, Duration};
-use tracing::{self, error, info, trace, warn};
+use tracing::{self, error, info, warn};
 
 use tracing_appender::non_blocking::WorkerGuard;
 #[cfg(not(feature = "tokio-console"))]
@@ -338,19 +338,19 @@ async fn run_node() -> Result<()> {
             });
     }
 
-    let root_dir_buf = config.root_dir()?;
-    let event_log_filepath = root_dir_buf.as_path().join("events.log");
-    let mut event_log = File::create(&event_log_filepath)?;
+    // let root_dir_buf = config.root_dir()?;
+    // let event_log_filepath = root_dir_buf.as_path().join("events.log");
+    // let mut event_log = File::create(&event_log_filepath)?;
 
     // This just keeps the node going as long as routing goes
-    while let Some(event) = event_stream.next().await {
-        if let Event::CmdProcessing(e) = event {
-            let str = format!("{}\n\n", e);
-            if let Err(e) = event_log.write_all(str.as_bytes()) {
-                trace!("Error when writing to event log: {}", e);
-            }
-            event_log.sync_all()?;
-        }
+    while let Some(_event) = event_stream.next().await {
+        // if let Event::CmdProcessing(e) = event {
+        //     let str = format!("{}\n\n", e);
+        //     if let Err(e) = event_log.write_all(str.as_bytes()) {
+        //         trace!("Error when writing to event log: {}", e);
+        //     }
+        //     event_log.sync_all()?;
+        // }
     }
 
     Ok(())
