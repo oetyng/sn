@@ -6,11 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::super::Cmd;
-
 use crate::elder_count;
 use crate::messaging::{system::SystemMsg, MsgKind, WireMsg};
 use crate::node::{
+    api::Cmd,
     core::{DeliveryStatus, Node, Proposal},
     messages::WireMsgUtils,
     Error, Result,
@@ -22,51 +21,26 @@ use std::{sync::Arc, time::Duration};
 use tokio::time::MissedTickBehavior;
 use tokio::{sync::watch, time};
 
-#[derive(Clone)]
-pub(crate) struct CmdProcessor {
-    dispatcher: Arc<Dispatcher>,
-}
-
-impl CmdProcessor {
-    pub(crate) fn new(dispatcher: Arc<Dispatcher>) -> Self {
-        Self { dispatcher }
-    }
-
-    pub(crate) async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
-        self.dispatcher.process_cmd(cmd).await
-    }
-}
-
 // Cmd Dispatcher.
+#[derive(Clone)]
 pub(crate) struct Dispatcher {
-    pub(crate) node: Arc<Node>,
-    cancel_timer_tx: watch::Sender<bool>,
-    cancel_timer_rx: watch::Receiver<bool>,
-}
-
-impl Drop for Dispatcher {
-    fn drop(&mut self) {
-        // Cancel all scheduled timers including any future ones.
-        let _res = self.cancel_timer_tx.send(true);
-    }
+    node: Arc<Node>,
+    dkg_timeout: Arc<DkgTimeout>,
 }
 
 impl Dispatcher {
     pub(super) fn new(node: Arc<Node>) -> Self {
         let (cancel_timer_tx, cancel_timer_rx) = watch::channel(false);
-        Self {
-            node,
+        let dkg_timeout = Arc::new(DkgTimeout {
             cancel_timer_tx,
             cancel_timer_rx,
-        }
-    }
+        });
 
-    pub(super) fn write_prefixmap_to_disk(self: Arc<Self>) {
-        let _handle = tokio::spawn(async move { self.node.write_prefix_map().await });
+        Self { node, dkg_timeout }
     }
 
     /// Handles a single cmd.
-    async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
+    pub(crate) async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
         match cmd {
             Cmd::CleanupPeerLinks => {
                 let linked_peers = self.node.comm.linked_peers().await;
@@ -112,7 +86,7 @@ impl Dispatcher {
                 wire_msg,
                 original_bytes,
             } => self.node.handle_msg(sender, wire_msg, original_bytes).await,
-            Cmd::HandleTimeout(token) => self.node.handle_timeout(token).await,
+            Cmd::HandleDkgTimeout(token) => self.node.handle_dkg_timeout(token).await,
             Cmd::HandleAgreement { proposal, sig } => {
                 self.node.handle_general_agreements(proposal, sig).await
             }
@@ -162,8 +136,8 @@ impl Dispatcher {
                 self.send_msg(&recipients, delivery_group_size, wire_msg)
                     .await
             }
-            Cmd::ScheduleTimeout { duration, token } => Ok(self
-                .handle_schedule_timeout(duration, token)
+            Cmd::ScheduleDkgTimeout { duration, token } => Ok(self
+                .handle_scheduled_dkg_timeout(duration, token)
                 .await
                 .into_iter()
                 .collect()),
@@ -294,8 +268,8 @@ impl Dispatcher {
         .map_err(|e: Error| e)
     }
 
-    async fn handle_schedule_timeout(&self, duration: Duration, token: u64) -> Option<Cmd> {
-        let mut cancel_rx = self.cancel_timer_rx.clone();
+    async fn handle_scheduled_dkg_timeout(&self, duration: Duration, token: u64) -> Option<Cmd> {
+        let mut cancel_rx = self.dkg_timeout.cancel_timer_rx.clone();
 
         if *cancel_rx.borrow() {
             // Timers are already cancelled, do nothing.
@@ -303,8 +277,20 @@ impl Dispatcher {
         }
 
         tokio::select! {
-            _ = time::sleep(duration) => Some(Cmd::HandleTimeout(token)),
+            _ = time::sleep(duration) => Some(Cmd::HandleDkgTimeout(token)),
             _ = cancel_rx.changed() => None,
         }
     }
+}
+
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        // Cancel all scheduled timers including any future ones.
+        let _res = self.dkg_timeout.cancel_timer_tx.send(true);
+    }
+}
+
+struct DkgTimeout {
+    cancel_timer_tx: watch::Sender<bool>,
+    cancel_timer_rx: watch::Receiver<bool>,
 }

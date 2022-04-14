@@ -7,10 +7,10 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 mod cmd_ctrl;
-mod dispatcher;
 
 use self::cmd_ctrl::CmdCtrl;
-use self::dispatcher::{CmdProcessor, Dispatcher};
+
+use super::dispatcher::Dispatcher;
 
 use crate::node::{
     api::cmds::Cmd,
@@ -29,8 +29,8 @@ const EVENT_CHANNEL_SIZE: usize = 2000;
 
 #[derive(Clone)]
 pub(crate) struct FlowControl {
+    node: Arc<Node>,
     cmd_ctrl: CmdCtrl,
-    dispatcher: Arc<Dispatcher>,
 }
 
 impl FlowControl {
@@ -40,19 +40,9 @@ impl FlowControl {
         incoming_conns: mpsc::Receiver<MsgEvent>,
     ) -> (Self, EventStream) {
         let (event_sender, event_receiver) = mpsc::channel(EVENT_CHANNEL_SIZE);
-        let dispatcher = Arc::new(Dispatcher::new(node));
-        let cmd_ctrl = CmdCtrl::new(
-            CmdProcessor::new(dispatcher.clone()),
-            monitoring,
-            event_sender,
-        );
+        let cmd_ctrl = CmdCtrl::new(Dispatcher::new(node.clone()), monitoring, event_sender);
 
-        dispatcher.clone().write_prefixmap_to_disk();
-
-        let ctrl = Self {
-            cmd_ctrl,
-            dispatcher,
-        };
+        let ctrl = Self { cmd_ctrl, node };
 
         ctrl.clone().start_connection_listening(incoming_conns);
         ctrl.clone().start_network_probing();
@@ -107,7 +97,7 @@ impl FlowControl {
                 let _instant = interval.tick().await;
 
                 // Send a probe message if we are an elder
-                let node = &self.dispatcher.node;
+                let node = &self.node;
                 if node.is_elder().await && !node.network_knowledge().prefix().await.is_empty() {
                     match node.generate_probe_msg().await {
                         Ok(cmd) => {
@@ -151,14 +141,13 @@ impl FlowControl {
             loop {
                 let _instant = interval.tick().await;
 
-                let unresponsive_nodes =
-                    match self.dispatcher.node.get_dysfunctional_node_names().await {
-                        Ok(nodes) => nodes,
-                        Err(error) => {
-                            error!("Error getting dysfunctional nodes: {error}");
-                            BTreeSet::default()
-                        }
-                    };
+                let unresponsive_nodes = match self.node.get_dysfunctional_node_names().await {
+                    Ok(nodes) => nodes,
+                    Err(error) => {
+                        error!("Error getting dysfunctional nodes: {error}");
+                        BTreeSet::default()
+                    }
+                };
 
                 if !unresponsive_nodes.is_empty() {
                     debug!("{:?} : {unresponsive_nodes:?}", LogMarker::ProposeOffline);
@@ -171,12 +160,7 @@ impl FlowControl {
                     }
                 }
 
-                match self
-                    .dispatcher
-                    .node
-                    .notify_about_newly_suspect_nodes()
-                    .await
-                {
+                match self.node.notify_about_newly_suspect_nodes().await {
                     Ok(suspect_cmds) => {
                         for cmd in suspect_cmds {
                             if let Err(e) = self.cmd_ctrl.push(cmd).await {
@@ -209,7 +193,7 @@ async fn handle_connection_events(ctrl: FlowControl, mut incoming_conns: mpsc::R
                 );
 
                 let span = {
-                    let node = &ctrl.dispatcher.node;
+                    let node = &ctrl.node;
                     trace_span!("handle_message", name = %node.info.read().await.name(), ?sender, msg_id = ?wire_msg.msg_id())
                 };
                 let _span_guard = span.enter();

@@ -468,7 +468,7 @@ impl Session {
 
     fn reset_timer(&mut self) -> Cmd {
         self.timer_token = next_timer_token();
-        Cmd::ScheduleTimeout {
+        Cmd::ScheduleDkgTimeout {
             duration: DKG_PROGRESS_INTERVAL,
             token: self.timer_token,
         }
@@ -642,7 +642,7 @@ mod tests {
                     self.outcome = Some(outcome.public_key_set.public_key());
                     Ok(vec![])
                 }
-                Cmd::ScheduleTimeout { .. } => Ok(vec![]),
+                Cmd::ScheduleDkgTimeout { .. } => Ok(vec![]),
                 other_cmd => {
                     bail!("Unexpected cmd: {:?}", other_cmd)
                 }

@@ -168,7 +168,7 @@ impl Node {
             node_dysfunction_detector
         );
 
-        Ok(Self {
+        let node = Self {
             comm,
             info: Arc::new(RwLock::new(info)),
             network_knowledge,
@@ -191,7 +191,11 @@ impl Node {
                 SUSPECT_NODE_RETENTION_DURATION,
             )),
             ae_backoff_cache: AeBackoffCache::default(),
-        })
+        };
+
+        node.write_prefix_map().await;
+
+        Ok(node)
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -296,20 +300,6 @@ impl Node {
             .track_comm_issue(name)
             .await
             .map_err(Error::from)
-    }
-
-    pub(crate) async fn write_prefix_map(&self) {
-        info!("Writing our latest PrefixMap to disk");
-        // TODO: Make this serialization human readable
-
-        let prefix_map = self.network_knowledge.prefix_map().clone();
-
-        let _ = tokio::spawn(async move {
-            // Compare and write Prefix to `~/.safe/prefix_maps` dir
-            if let Err(e) = compare_and_write_prefix_map_to_disk(&prefix_map).await {
-                error!("Error writing PrefixMap to `~/.safe` dir: {:?}", e);
-            }
-        });
     }
 
     pub(super) async fn state_snapshot(&self) -> StateSnapshot {
@@ -485,6 +475,20 @@ impl Node {
             .elder_count();
         let prefix = self.network_knowledge.prefix().await;
         debug!("{:?}: {:?} Elders, {:?} Adults.", prefix, elders, adults);
+    }
+
+    async fn write_prefix_map(&self) {
+        info!("Writing our latest PrefixMap to disk");
+        // TODO: Make this serialization human readable
+
+        let prefix_map = self.network_knowledge.prefix_map().clone();
+
+        let _ = tokio::spawn(async move {
+            // Compare and write Prefix to `~/.safe/prefix_maps` dir
+            if let Err(e) = compare_and_write_prefix_map_to_disk(&prefix_map).await {
+                error!("Error writing PrefixMap to `~/.safe` dir: {:?}", e);
+            }
+        });
     }
 }
 

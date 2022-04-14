@@ -77,8 +77,8 @@ pub(crate) enum Cmd {
         // original bytes to avoid reserializing for entropy checks
         original_bytes: Option<Bytes>,
     },
-    /// Handle a timeout previously scheduled with `ScheduleTimeout`.
-    HandleTimeout(u64),
+    /// Handle a timeout previously scheduled with `ScheduleDkgTimeout`.
+    HandleDkgTimeout(u64),
     /// Handle peer that's been detected as lost.
     HandlePeerLost(Peer),
     /// Handle agreement on a proposal.
@@ -115,9 +115,9 @@ pub(crate) enum Cmd {
         delivery_group_size: usize,
         wire_msg: WireMsg,
     },
-    /// Schedule a timeout after the given duration. When the timeout expires, a `HandleTimeout`
+    /// Schedule a timeout after the given duration. When the timeout expires, a `HandleDkgTimeout`
     /// cmd is raised. The token is used to identify the timeout.
-    ScheduleTimeout { duration: Duration, token: u64 },
+    ScheduleDkgTimeout { duration: Duration, token: u64 },
     /// Test peer's connectivity
     SendAcceptedOnlineShare {
         peer: Peer,
@@ -146,10 +146,10 @@ impl Cmd {
             HandlePeerLost(_) => 10,
             ProposeOffline(_) => 10,
 
-            HandleTimeout(_) => 9,
+            HandleDkgTimeout(_) => 9,
             HandleNewNodeOnline(_) => 9,
 
-            ScheduleTimeout { .. } => 8,
+            ScheduleDkgTimeout { .. } => 8,
             StartConnectivityTest(_) => 8,
             TestConnectivity(_) => 8,
 
@@ -178,8 +178,8 @@ impl fmt::Display for Cmd {
             Cmd::CleanupPeerLinks => {
                 write!(f, "CleanupPeerLinks")
             }
-            Cmd::HandleTimeout(_) => write!(f, "HandleTimeout"),
-            Cmd::ScheduleTimeout { .. } => write!(f, "ScheduleTimeout"),
+            Cmd::HandleDkgTimeout(_) => write!(f, "HandleDkgTimeout"),
+            Cmd::ScheduleDkgTimeout { .. } => write!(f, "ScheduleDkgTimeout"),
             #[cfg(not(feature = "test-utils"))]
             Cmd::HandleMsg { wire_msg, .. } => {
                 write!(f, "HandleMsg {:?}", wire_msg.msg_id())

@@ -6,11 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::CmdProcessor;
-
 use crate::node::{
     api::{
         cmds::{Cmd, CmdJob},
+        dispatcher::Dispatcher,
         event::CmdProcessing,
     },
     core::Measurements,
@@ -42,18 +41,17 @@ const ORDER: Ordering = Ordering::SeqCst;
 #[derive(Clone)]
 pub(crate) struct CmdCtrl {
     cmd_queue: Arc<RwLock<PriorityQueue<EnqueuedJob, Priority>>>,
-    //finished: MsgThroughput,
     attempted: MsgThroughput,
     monitoring: Measurements,
     stopped: Arc<RwLock<bool>>,
-    processor: CmdProcessor,
+    dispatcher: Dispatcher,
     id_counter: Arc<AtomicU64>,
     event_sender: mpsc::Sender<Event>,
 }
 
 impl CmdCtrl {
     pub(crate) fn new(
-        processor: CmdProcessor,
+        dispatcher: Dispatcher,
         monitoring: Measurements,
         event_sender: mpsc::Sender<Event>,
     ) -> Self {
@@ -62,7 +60,7 @@ impl CmdCtrl {
             attempted: MsgThroughput::default(),
             monitoring,
             stopped: Arc::new(RwLock::new(false)),
-            processor,
+            dispatcher,
             id_counter: Arc::new(AtomicU64::new(0)),
             event_sender,
         };
@@ -183,7 +181,7 @@ impl CmdCtrl {
                             .await;
                     }
                     match clone
-                        .processor
+                        .dispatcher
                         .process_cmd(enqueued.job.cmd().clone())
                         .await
                     {
