@@ -11,14 +11,14 @@ use sysinfo::{LoadAvg, RefreshKind, System, SystemExt};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
-pub(super) struct LoadSampling {
+pub(crate) struct LoadSampling {
     system: Arc<RwLock<System>>,
     load_sample: Arc<RwLock<LoadAvg>>,
     cores: usize,
 }
 
 impl LoadSampling {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let cores = num_cpus::get_physical();
         debug!("num physical cores: {}", cores);
 

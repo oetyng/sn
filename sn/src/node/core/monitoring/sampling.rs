@@ -20,7 +20,7 @@ const MAX_CPU_LOAD: f64 = 80.0; // unit: percent
 const ORDER: Ordering = Ordering::SeqCst;
 
 #[derive(Debug, Clone)]
-pub(super) struct Sampling {
+pub(crate) struct Sampling {
     name: String,
     period: u8,
     default_load_per_event: f64,
@@ -30,7 +30,7 @@ pub(super) struct Sampling {
 }
 
 impl Sampling {
-    pub(super) fn new(name: String, initial_value: f64, period: u8) -> Self {
+    pub(crate) fn new(name: String, initial_value: f64, period: u8) -> Self {
         Self {
             name,
             period,

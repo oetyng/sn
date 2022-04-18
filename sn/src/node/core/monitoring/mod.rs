@@ -6,8 +6,8 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-mod load_sampling;
-mod sampling;
+pub(crate) mod load_sampling;
+pub(crate) mod sampling;
 
 use self::load_sampling::LoadSampling;
 use self::sampling::Sampling;
@@ -15,11 +15,11 @@ use self::sampling::Sampling;
 use std::time::Duration;
 use tokio::time::MissedTickBehavior;
 
-const INITIAL_MSGS_PER_S: f64 = 500.0;
-const INITIAL_CMDS_PER_S: f64 = 250.0;
+pub(crate) const INITIAL_MSGS_PER_S: f64 = 500.0;
+pub(crate) const INITIAL_CMDS_PER_S: f64 = 250.0;
 
 const INTERVAL_ONE_MINUTE: u8 = 1;
-const INTERVAL_FIFTEEN_MINUTES: u8 = 15;
+pub(crate) const INTERVAL_FIFTEEN_MINUTES: u8 = 15;
 
 // Used to measure local activity per s, using 15 min moving average.
 // Specifically this measures cmds handled, and msgs received.
@@ -27,9 +27,9 @@ const INTERVAL_FIFTEEN_MINUTES: u8 = 15;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Measurements {
-    cmd_sampling: Sampling,
-    msg_sampling: Sampling,
-    load_sampling: LoadSampling,
+    pub(crate) cmd_sampling: Sampling,
+    pub(crate) msg_sampling: Sampling,
+    pub(crate) load_sampling: LoadSampling,
 }
 
 impl Measurements {
