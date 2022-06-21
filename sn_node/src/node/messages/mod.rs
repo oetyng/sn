@@ -51,11 +51,11 @@ impl WireMsgUtils for WireMsg {
         let msg_payload =
             WireMsg::serialize_msg_payload(&msg).map_err(|_| Error::InvalidMessage)?;
 
-        let msg_kind = AuthKind::NodeBlsShare(
+        let auth_kind = AuthKind::NodeBlsShare(
             bls_share_authorize(src_section_pk, src_name, key_share, &msg_payload).into_inner(),
         );
 
-        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, msg_kind, dst)?;
+        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, auth_kind, dst)?;
 
         #[cfg(test)]
         let wire_msg = wire_msg.set_payload_debug(msg);
@@ -73,11 +73,11 @@ impl WireMsgUtils for WireMsg {
         let msg_payload =
             WireMsg::serialize_msg_payload(&msg).map_err(|_| Error::InvalidMessage)?;
 
-        let msg_kind = AuthKind::Node(
+        let auth_kind = AuthKind::Node(
             NodeAuth::authorize(src_section_pk, &node.keypair, &msg_payload).into_inner(),
         );
 
-        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, msg_kind, dst)?;
+        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, auth_kind, dst)?;
 
         #[cfg(test)]
         let wire_msg = wire_msg.set_payload_debug(msg);
