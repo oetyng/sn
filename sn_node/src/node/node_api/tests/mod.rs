@@ -63,6 +63,24 @@ use xor_name::{Prefix, XorName};
 
 static TEST_EVENT_CHANNEL_SIZE: usize = 20;
 
+async fn run_and_collect_cmds(cmd: Cmd, dispatcher: &Dispatcher) -> Result<Vec<Cmd>> {
+    let mut all_cmds = vec![];
+
+    let mut cmds = dispatcher.process_cmd(cmd).await?;
+
+    while !cmds.is_empty() {
+        all_cmds.extend(cmds.clone());
+        let mut new_cmds = vec![];
+        for cmd in cmds {
+            println!("Cmd: {}", cmd);
+            new_cmds.extend(dispatcher.process_cmd(cmd).await?);
+        }
+        cmds = new_cmds;
+    }
+
+    Ok(all_cmds)
+}
+
 #[tokio::test]
 async fn receive_join_request_without_resource_proof_response() -> Result<()> {
     let local = tokio::task::LocalSet::new();
@@ -116,16 +134,17 @@ async fn receive_join_request_without_resource_proof_response() -> Result<()> {
 
             let original_bytes = wire_msg.serialize()?;
 
-            let mut cmds = dispatcher
-                .process_cmd(Cmd::ValidateMsg {
+            let all_cmds = run_and_collect_cmds(
+                Cmd::ValidateMsg {
                     origin: new_node.peer(),
                     wire_msg,
                     original_bytes,
-                })
-                .await?
-                .into_iter();
+                },
+                &dispatcher,
+            )
+            .await?;
 
-            assert!(cmds.any(|cmd| {
+            assert!(all_cmds.into_iter().any(|cmd| {
                 match cmd {
                     Cmd::SendMsg { wire_msg, .. } => match wire_msg.into_msg() {
                         Ok(MsgType::System {
@@ -211,13 +230,15 @@ async fn membership_churn_starts_on_join_request_with_resource_proof() -> Result
 
             let original_bytes = wire_msg.serialize()?;
 
-            let _ = dispatcher
-                .process_cmd(Cmd::ValidateMsg {
+            let _ = run_and_collect_cmds(
+                Cmd::ValidateMsg {
                     origin: new_node.peer(),
                     wire_msg,
                     original_bytes,
-                })
-                .await?;
+                },
+                &dispatcher,
+            )
+            .await?;
 
             assert!(node
                 .read()
@@ -309,13 +330,15 @@ async fn membership_churn_starts_on_join_request_from_relocated_node() -> Result
 
             let original_bytes = wire_msg.serialize()?;
 
-            let _ = dispatcher
-                .process_cmd(Cmd::ValidateMsg {
+            let _ = run_and_collect_cmds(
+                Cmd::ValidateMsg {
                     origin: relocated_node.peer(),
                     wire_msg,
                     original_bytes,
-                })
-                .await?;
+                },
+                &dispatcher,
+            )
+            .await?;
 
             assert!(node
                 .read()
@@ -452,9 +475,7 @@ async fn handle_agreement_on_online_of_elder_candidate() -> Result<()> {
                 .unwrap()
                 .force_bootstrap(node_state.to_msg());
 
-            let cmds = dispatcher
-                .process_cmd(Cmd::HandleNewNodeOnline(auth))
-                .await?;
+            let cmds = run_and_collect_cmds(Cmd::HandleNewNodeOnline(auth), &dispatcher).await?;
 
             // Verify we sent a `DkgStart` message with the expected participants.
             let mut dkg_start_sent = false;
@@ -508,16 +529,14 @@ async fn handle_online_cmd(
     let node_state = NodeState::joined(*peer, None);
     let auth = section_signed(sk_set.secret_key(), node_state.to_msg())?;
 
-    let cmds = dispatcher
-        .process_cmd(Cmd::HandleNewNodeOnline(auth))
-        .await?;
+    let all_cmds = run_and_collect_cmds(Cmd::HandleNewNodeOnline(auth), &dispatcher).await?;
 
     let mut status = HandleOnlineStatus {
         node_approval_sent: false,
         relocate_details: None,
     };
 
-    for cmd in cmds {
+    for cmd in all_cmds {
         let (recipients, wire_msg) = match cmd {
             Cmd::SendMsg {
                 recipients,
