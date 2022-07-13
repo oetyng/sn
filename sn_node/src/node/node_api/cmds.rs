@@ -202,14 +202,14 @@ impl Cmd {
             Comm(_) => 7,
 
             // See [`MsgType`] for the priority constants and the range of possible values.
+            ValidateMsg { wire_msg, .. } => wire_msg.priority(),
             HandleValidSystemMsg { msg, .. } => msg.priority(),
             HandleValidServiceMsg { msg, .. } => msg.priority(),
             SendMsg { wire_msg, .. } => wire_msg.priority(),
             SignOutgoingSystemMsg { msg, .. } => msg.priority(),
             SendMsgDeliveryGroup { wire_msg, .. } => wire_msg.priority(),
 
-            ValidateMsg { .. } => -9, // before it's validated, we cannot give it high prio, as it would be a spam vector
-
+            //ValidateMsg { .. } => -9, // before it's validated, we cannot give it high prio, as it would be a spam vector
             CleanupPeerLinks => -10,
         }
     }
