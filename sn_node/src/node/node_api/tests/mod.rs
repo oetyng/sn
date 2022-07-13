@@ -125,28 +125,21 @@ async fn receive_join_request_without_resource_proof_response() -> Result<()> {
                 .await?
                 .into_iter();
 
-            let mut next_cmd = cmds.next();
+            assert!(cmds.any(|cmd| {
+                match cmd {
+                    Cmd::SendMsg { wire_msg, .. } => match wire_msg.into_msg() {
+                        Ok(MsgType::System {
+                            msg: SystemMsg::JoinResponse(response),
+                            ..
+                        }) => {
+                            matches!(*response, JoinResponse::ResourceChallenge { .. })
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                }
+            }));
 
-            if !matches!(next_cmd, Some(Cmd::SendMsg { .. })) {
-                next_cmd = cmds.next();
-            }
-
-            let response_wire_msg = assert_matches!(
-                // we want to check the cmd _after_ that
-                next_cmd,
-                Some(Cmd::SendMsg {
-                    wire_msg,
-                    ..
-                }) => wire_msg
-            );
-
-            assert_matches!(
-                response_wire_msg.into_msg(),
-                Ok(MsgType::System {
-                    msg: SystemMsg::JoinResponse(response),
-                    ..
-                }) => assert_matches!(*response, JoinResponse::ResourceChallenge { .. })
-            );
             Result::<()>::Ok(())
         })
         .await
