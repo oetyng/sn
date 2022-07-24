@@ -6,12 +6,17 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+//! Implementation of the comms for the SAFE Network.
+
 #[cfg(feature = "back-pressure")]
 mod back_pressure;
 
+mod cmds;
 mod link;
 mod listener;
 mod peer_session;
+
+pub use self::cmds::Cmd;
 
 #[cfg(feature = "back-pressure")]
 use self::back_pressure::BackPressure;
@@ -47,14 +52,6 @@ pub(crate) struct Comm {
     #[cfg(feature = "back-pressure")]
     back_pressure: BackPressure,
     sessions: Arc<DashMap<Peer, PeerSession>>,
-}
-
-/// Commands for interacting with Comm.
-#[derive(Debug, Clone)]
-pub(crate) enum Cmd {
-    #[cfg(feature = "back-pressure")]
-    /// Set message rate for peer to the desired msgs per second
-    Regulate { peer: Peer, msgs_per_s: f64 },
 }
 
 impl Comm {

@@ -11,8 +11,7 @@ use crate::{
     node::{
         flow_ctrl::cmds::Cmd,
         messaging::{OutgoingMsg, Peers},
-        DkgSessionInfo, Error, Event, MembershipEvent, Node, Proposal as CoreProposal, Result,
-        MIN_LEVEL_WHEN_FULL,
+        DkgSessionInfo, Error, Event, MembershipEvent, Node, Proposal, Result, MIN_LEVEL_WHEN_FULL,
     },
 };
 
@@ -29,7 +28,6 @@ use sn_interface::{
             NodeEvent,
             NodeMsgAuthorityUtils,
             NodeQuery,
-            Proposal as ProposalMsg,
             SystemMsg,
         },
         AuthorityProof, MsgId, NodeMsgAuthority, SectionAuth, WireMsg,
@@ -334,19 +332,11 @@ impl Node {
 
                 trace!("Handling msg: Propose from {}: {:?}", sender, msg_id);
 
-                // lets convert our message into a usable proposal for core
-                let core_proposal = match proposal {
-                    ProposalMsg::Offline(node_state) => {
-                        CoreProposal::Offline(node_state.into_state())
-                    }
-                    ProposalMsg::SectionInfo(sap) => CoreProposal::SectionInfo(sap.into_state()),
-                    ProposalMsg::NewElders(sap) => CoreProposal::NewElders(sap.into_authed_state()),
-                    ProposalMsg::JoinsAllowed(allowed) => CoreProposal::JoinsAllowed(allowed),
-                };
+                let proposal = Proposal::from_msg(proposal);
 
                 Node::handle_proposal(
                     msg_id,
-                    core_proposal,
+                    proposal,
                     sig_share,
                     sender,
                     &self.network_knowledge,

@@ -10,7 +10,7 @@ use super::cmds::Cmd;
 
 use chrono::{DateTime, Utc};
 use custom_debug::Debug;
-use std::time::SystemTime;
+use std::{sync::Arc, time::SystemTime};
 
 /// A struct for the job of controlling the flow
 /// of a [`Cmd`] in the system.
@@ -45,23 +45,29 @@ impl CmdJob {
         }
     }
 
-    pub(crate) fn id(&self) -> usize {
+    /// The id of the job.
+    pub fn id(&self) -> usize {
         self.id
     }
 
-    pub(crate) fn parent_id(&self) -> Option<usize> {
+    /// The parent id of the job, is the id
+    /// of the job that resulted in this job being created.
+    pub fn parent_id(&self) -> Option<usize> {
         self.parent_id
     }
 
-    pub(crate) fn cmd(&self) -> &Cmd {
+    /// The cmd to be handled.
+    pub fn cmd(&self) -> &Cmd {
         &self.cmd
     }
 
-    pub(crate) fn priority(&self) -> i32 {
+    /// The priority of this job.
+    pub fn priority(&self) -> i32 {
         self.priority
     }
 
-    pub(crate) fn created_at(&self) -> SystemTime {
+    /// The time the job was created.
+    pub fn created_at(&self) -> SystemTime {
         self.created_at
     }
 }
@@ -69,40 +75,52 @@ impl CmdJob {
 /// Informing on the processing of an individual cmd.
 #[derive(custom_debug::Debug, Clone)]
 pub enum CmdProcessLog {
-    ///
+    /// The job has started.
     Started {
-        ///
-        job: CmdJob,
-        ///
+        /// The job.
+        job: Arc<CmdJob>,
+        /// The time it started.
         time: SystemTime,
     },
-    ///
+    /// The job is being retried.
     Retrying {
-        ///
-        job: CmdJob,
-        ///
+        /// The job.
+        job: Arc<CmdJob>,
+        /// The re-attempt number, 1 is the first retry.
         retry: usize,
-        ///
+        /// The time it started the retry.
         time: SystemTime,
     },
-    ///
+    /// The job has finished.
     Finished {
-        ///
-        job: CmdJob,
-        ///
+        /// The job.
+        job: Arc<CmdJob>,
+        /// The time it finished.
         time: SystemTime,
     },
-    ///
+    /// The job failed.
     Failed {
-        ///
-        job: CmdJob,
-        ///
+        /// The job.
+        job: Arc<CmdJob>,
+        /// The number which it failed on. 0 is the first attempt, 1 is the first retry.
         retry: usize,
-        ///
+        /// The time it failed.
         time: SystemTime,
-        ///
+        /// The error it failed with.
         error: String,
     },
+}
+
+impl CmdProcessLog {
+    /// Get the job being processed.
+    pub fn cmd_job(&self) -> &CmdJob {
+        match self {
+            Self::Started { job, .. }
+            | Self::Retrying { job, .. }
+            | Self::Finished { job, .. }
+            | Self::Failed { job, .. } => job,
+        }
+    }
 }
 
 impl std::fmt::Display for CmdProcessLog {

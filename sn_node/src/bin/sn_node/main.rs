@@ -27,14 +27,12 @@
     unused_results
 )]
 
-use sn_node::node::{start_node, Config, Error as NodeError};
+use sn_node::node::{start_node, Cmd, Config, Error as NodeError, Event, MembershipEvent};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use color_eyre::{Section, SectionExt};
-#[cfg(feature = "chaos")]
-use eyre::ErrReport;
-use eyre::{eyre, Context, Result};
+use eyre::{eyre, Context, ErrReport, Result};
 use self_update::{cargo_crate_version, Status};
 use std::{io::Write, process::exit};
 use tokio::time::{sleep, Duration};
@@ -209,9 +207,10 @@ async fn run_node(config: &Config) -> Result<()> {
     // runner.start().await;
     while let Some(log) = runner.await_next_log().await {
         trace!("Node log {}", log);
-        // if let Event::Membership(MembershipEvent::ChurnJoinMissError) = log {
-        //     return Err(NodeError::ChurnJoinMiss).map_err(ErrReport::msg);
-        // }
+        let cmd = log.cmd_job().cmd();
+        if let Cmd::HandleEvent(Event::Membership(MembershipEvent::ChurnJoinMissError)) = cmd {
+            return Err(NodeError::ChurnJoinMiss).map_err(ErrReport::msg);
+        }
     }
 
     Ok(())

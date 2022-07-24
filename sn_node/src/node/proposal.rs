@@ -15,7 +15,7 @@ use sn_interface::{
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Proposal {
+pub enum Proposal {
     Offline(NodeState),
     SectionInfo(SectionAuthorityProvider),
     NewElders(SectionAuth<SectionAuthorityProvider>),
@@ -55,6 +55,16 @@ impl Proposal {
             Self::SectionInfo(sap) => ProposalMsg::SectionInfo(sap.to_msg()),
             Self::NewElders(sap) => ProposalMsg::NewElders(sap.into_authed_msg()),
             Self::JoinsAllowed(allowed) => ProposalMsg::JoinsAllowed(allowed),
+        }
+    }
+
+    // Convert from message
+    pub(crate) fn from_msg(proposal: ProposalMsg) -> Self {
+        match proposal {
+            ProposalMsg::Offline(node_state) => Self::Offline(node_state.into_state()),
+            ProposalMsg::SectionInfo(sap) => Self::SectionInfo(sap.into_state()),
+            ProposalMsg::NewElders(sap) => Self::NewElders(sap.into_authed_state()),
+            ProposalMsg::JoinsAllowed(allowed) => Self::JoinsAllowed(allowed),
         }
     }
 }

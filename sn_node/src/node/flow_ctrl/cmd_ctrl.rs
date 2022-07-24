@@ -115,12 +115,12 @@ impl CmdCtrl {
         let (watcher, reporter) = status_watching();
 
         let job = EnqueuedJob {
-            job: CmdJob::new(
+            job: Arc::new(CmdJob::new(
                 self.id_counter.fetch_add(1, ORDER),
                 parent_id,
                 cmd,
                 SystemTime::now(),
-            ),
+            )),
             retries: 0,
             reporter,
         };
@@ -261,7 +261,7 @@ impl MsgThroughput {
 
 #[derive(Debug)]
 pub(crate) struct EnqueuedJob {
-    job: CmdJob,
+    job: Arc<CmdJob>,
     retries: usize,
     reporter: StatusReporting,
 }

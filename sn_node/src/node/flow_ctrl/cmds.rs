@@ -11,8 +11,6 @@ use crate::node::{
     Proposal, XorName,
 };
 
-use bytes::Bytes;
-use custom_debug::Debug;
 use sn_consensus::Decision;
 use sn_dysfunction::IssueType;
 use sn_interface::{
@@ -24,6 +22,9 @@ use sn_interface::{
     network_knowledge::{SectionAuthorityProvider, SectionKeyShare},
     types::Peer,
 };
+
+use bytes::Bytes;
+use custom_debug::Debug;
 use std::{
     collections::BTreeSet,
     fmt,
@@ -43,42 +44,63 @@ use sn_interface::messaging::Entity;
 /// In other words, it enables enhanced flow control.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
-pub(crate) enum Cmd {
+pub enum Cmd {
     /// Start chain reaction based on something that happened.
     HandleEvent(crate::node::Event),
     /// Validate `wire_msg` from `sender`.
     /// Holding the WireMsg that has been received from the network,
     ValidateMsg {
+        /// The origin of the msg.
         origin: Peer,
+        /// The serialized msg.
         wire_msg: WireMsg,
+        /// original bytes to avoid reserializing for entropy checks
         #[debug(skip)]
-        // original bytes to avoid reserializing for entropy checks
         original_bytes: Bytes,
     },
     /// Log a Node's Punishment, this pulls dysfunction and write locks out of some functions
-    TrackNodeIssueInDysfunction { name: XorName, issue: IssueType },
+    TrackNodeIssueInDysfunction {
+        /// The node.
+        name: XorName,
+        /// The type of issue to track.
+        issue: IssueType,
+    },
     /// Adds peer to set of recipients of an already pending query,
     /// or adds a pending query if it didn't already exist.
     AddToPendingQueries {
+        ///
         operation_id: OperationId,
+        ///
         origin: Peer,
     },
+    /// Handle a generally validated msg (sigs and ae checks out).
     HandleValidSystemMsg {
+        /// The id of the msg.
         msg_id: MsgId,
+        /// The deserialized msg.
         msg: SystemMsg,
+        /// The origin of the msg.
         origin: Peer,
+        /// The signature over the msg by the origin.
         msg_authority: NodeMsgAuthority,
+        /// The serialized payload of the msg.
         #[debug(skip)]
         wire_msg_payload: Bytes,
+        /// A trace route sent to client.
         #[cfg(feature = "traceroute")]
         traceroute: Vec<Entity>,
     },
+    /// Handle a generally validated msg (sigs and ae checks out).
     HandleValidServiceMsg {
+        /// The id of the msg.
         msg_id: MsgId,
+        /// The deserialized msg.
         msg: ServiceMsg,
+        /// The origin of the msg.
         origin: Peer,
         /// Requester's authority over this message
         auth: AuthorityProof<ServiceAuth>,
+        /// A trace route sent to client.
         #[cfg(feature = "traceroute")]
         traceroute: Vec<Entity>,
     },
@@ -89,33 +111,51 @@ pub(crate) enum Cmd {
     /// Handle peer that's been detected as lost.
     HandlePeerFailedSend(Peer),
     /// Handle agreement on a proposal.
-    HandleAgreement { proposal: Proposal, sig: KeyedSig },
+    HandleAgreement {
+        ///
+        proposal: Proposal,
+        ///
+        sig: KeyedSig,
+    },
     /// Handle a membership decision.
     HandleMembershipDecision(Decision<NodeState>),
     /// Handle agree on elders. This blocks node message processing until complete.
     HandleNewEldersAgreement {
+        ///
         new_elders: SectionAuth<SectionAuthorityProvider>,
+        ///
         sig: KeyedSig,
     },
     /// Handle the outcome of a DKG session where we are one of the participants (that is, one of
     /// the proposed new elders).
     HandleDkgOutcome {
+        ///
         section_auth: SectionAuthorityProvider,
+        ///
         outcome: SectionKeyShare,
     },
     /// Handle a DKG failure that was observed by a majority of the DKG participants.
     HandleDkgFailure(DkgFailureSigSet),
     /// Performs serialisation and signing and sends the msg.
     SendMsg {
+        ///
         msg: OutgoingMsg,
+        ///
         msg_id: MsgId,
+        ///
         recipients: Peers,
+        ///
         #[cfg(feature = "traceroute")]
         traceroute: Vec<Entity>,
     },
     /// Schedule a timeout after the given duration. When the timeout expires, a `HandleDkgTimeout`
     /// cmd is raised. The token is used to identify the timeout.
-    ScheduleDkgTimeout { duration: Duration, token: u64 },
+    ScheduleDkgTimeout {
+        ///
+        duration: Duration,
+        ///
+        token: u64,
+    },
     /// Proposes peers as offline
     ProposeOffline(BTreeSet<XorName>),
     /// Send a signal to all Elders to

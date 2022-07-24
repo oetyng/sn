@@ -37,7 +37,7 @@ use self::{
         MAX_WAITING_PEERS_PER_QUERY, RESOURCE_PROOF_DATA_SIZE, RESOURCE_PROOF_DIFFICULTY,
     },
     data_records::MIN_LEVEL_WHEN_FULL,
-    flow_ctrl::{cmds::Cmd, event::Elders},
+    flow_ctrl::event::Elders,
     proposal::Proposal,
 };
 
@@ -46,6 +46,7 @@ pub use self::{
     error::{Error, Result},
     flow_ctrl::{
         cmd_job::{CmdJob, CmdProcessLog},
+        cmds::Cmd,
         event::{Event, MembershipEvent, MessagingEvent, NodeElderChange},
         event_channel::EventReceiver,
     },
