@@ -65,13 +65,7 @@ impl Dispatcher {
     /// Handles a single cmd.
     pub(crate) async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
         match cmd {
-            Cmd::HandleEvents(events) => {
-                let mut cmds = vec![];
-                for event in events {
-                    cmds.extend(self.process_event(event).await.into_iter());
-                }
-                Ok(cmds)
-            }
+            Cmd::HandleEvent(event) => Ok(self.process_event(event).await.into_iter().collect()),
             Cmd::CleanupPeerLinks => {
                 let members = { self.node.read().await.network_knowledge.section_members() };
                 self.comm.cleanup_peers(members).await;
@@ -273,7 +267,7 @@ impl Dispatcher {
     async fn process_event(&self, event: crate::node::Event) -> Option<Cmd> {
         use crate::data::Event as DataEvent;
         match event {
-            crate::node::Event::Messaging(_) | crate::node::Event::CmdProcessing(_) => None,
+            crate::node::Event::Messaging(_) => None,
             crate::node::Event::Membership(e) => match e {
                 MembershipEvent::AdultsChanged { .. } => {
                     // Only trigger data completion request when there is an adult change.

@@ -91,7 +91,6 @@ async fn receive_join_request_without_resource_proof_response() -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
             )
             .await?;
 
@@ -166,7 +165,6 @@ async fn membership_churn_starts_on_join_request_with_resource_proof() -> Result
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
             )
             .await?;
 
@@ -264,7 +262,6 @@ async fn membership_churn_starts_on_join_request_from_relocated_node() -> Result
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
             )
             .await?;
 
@@ -335,8 +332,6 @@ async fn membership_churn_starts_on_join_request_from_relocated_node() -> Result
 
 #[tokio::test]
 async fn handle_agreement_on_online() -> Result<()> {
-    let (event_sender, mut event_receiver) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
-
     // Construct a local task set that can run `!Send` futures.
     let local = tokio::task::LocalSet::new();
 
@@ -345,8 +340,7 @@ async fn handle_agreement_on_online() -> Result<()> {
         .run_until(async move {
             let prefix = Prefix::default();
 
-            let (section_auth, mut nodes, sk_set) =
-                random_sap(prefix, elder_count());
+            let (section_auth, mut nodes, sk_set) = random_sap(prefix, elder_count());
             let (section, section_key_share) = create_section(&sk_set, &section_auth)?;
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
@@ -358,7 +352,6 @@ async fn handle_agreement_on_online() -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
             let data = Data::new(root_storage_dir.as_path(), used_space)?;
@@ -369,10 +362,10 @@ async fn handle_agreement_on_online() -> Result<()> {
             let status = handle_online_cmd(&new_peer, &sk_set, &dispatcher, &section_auth).await?;
             assert!(status.node_approval_sent);
 
-            assert_matches!(event_receiver.next().await, Some(Event::Membership(MembershipEvent::MemberJoined { name, age, .. })) => {
-                assert_eq!(name, new_peer.name());
-                assert_eq!(age, MIN_ADULT_AGE);
-            });
+            // assert_matches!(event_receiver.next().await, Some(Event::Membership(MembershipEvent::MemberJoined { name, age, .. })) => {
+            //     assert_eq!(name, new_peer.name());
+            //     assert_eq!(age, MIN_ADULT_AGE);
+            // });
 
             Result::<()>::Ok(())
         })
@@ -433,7 +426,6 @@ async fn handle_agreement_on_online_of_elder_candidate() -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
             )
             .await?;
 
@@ -588,7 +580,6 @@ async fn handle_join_request_of_rejoined_node() -> Result<()> {
             let (section, section_key_share) = create_section(&sk_set, &sap)?;
 
             // Make a Node
-            let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let info = node_infos.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let used_space = UsedSpace::new(max_capacity);
@@ -599,7 +590,6 @@ async fn handle_join_request_of_rejoined_node() -> Result<()> {
                 info.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
 
@@ -661,7 +651,6 @@ async fn handle_agreement_on_offline_of_non_elder() -> Result<()> {
             let node_state = section_signed(sk_set.secret_key(), node_state)?;
             let _updated = section.update_member(node_state);
 
-            let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let used_space = UsedSpace::new(max_capacity);
@@ -672,7 +661,6 @@ async fn handle_agreement_on_offline_of_non_elder() -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
 
@@ -725,7 +713,6 @@ async fn handle_agreement_on_offline_of_elder() -> Result<()> {
                 .leave()?;
 
             // Create our node
-            let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let used_space = UsedSpace::new(max_capacity);
 
@@ -736,7 +723,6 @@ async fn handle_agreement_on_offline_of_elder() -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
 
@@ -801,7 +787,6 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
                 NetworkKnowledge::new(pk0, chain.clone(), signed_old_sap, None)?;
 
             // Create our node
-            let (event_sender, mut event_receiver) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let section_key_share = create_section_key_share(&sk_set1, 0);
             let elder = elders.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
@@ -813,7 +798,6 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
                 elder.keypair.clone(),
                 network_knowledge,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
 
@@ -842,7 +826,7 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
                 sk_set2.public_keys(),
                 0,
             );
-            let new_section_elders: BTreeSet<_> = new_sap.names();
+            //let new_section_elders: BTreeSet<_> = new_sap.names();
             let signed_new_sap = section_signed(sk2, new_sap.clone())?;
 
             // Create the `Sync` message containing the new `Section`.
@@ -882,16 +866,16 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
             )
             .await?;
 
-            // Verify our `Section` got updated.
-            assert_matches!(
-                event_receiver.next().await,
-                Some(Event::Membership(MembershipEvent::EldersChanged { elders, .. })) => {
-                    assert_eq!(elders.key, pk2);
-                    assert!(elders.added.iter().all(|a| new_section_elders.contains(a)));
-                    assert!(elders.remaining.iter().all(|a| new_section_elders.contains(a)));
-                    assert!(elders.removed.iter().all(|r| !new_section_elders.contains(r)));
-                }
-            );
+            // // Verify our `Section` got updated.
+            // assert_matches!(
+            //     event_receiver.next().await,
+            //     Some(Event::Membership(MembershipEvent::EldersChanged { elders, .. })) => {
+            //         assert_eq!(elders.key, pk2);
+            //         assert!(elders.added.iter().all(|a| new_section_elders.contains(a)));
+            //         assert!(elders.remaining.iter().all(|a| new_section_elders.contains(a)));
+            //         assert!(elders.removed.iter().all(|r| !new_section_elders.contains(r)));
+            //     }
+            // );
             Result::<()>::Ok(())
         })
         .await
@@ -930,7 +914,6 @@ async fn untrusted_ae_msg_errors() -> Result<()> {
                 members: BTreeSet::default(),
             };
 
-            let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let info = gen_info(MIN_ADULT_AGE, None);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let used_space = UsedSpace::new(max_capacity);
@@ -941,7 +924,6 @@ async fn untrusted_ae_msg_errors() -> Result<()> {
                 info.keypair.clone(),
                 our_section.clone(),
                 None,
-                event_sender,
             )
             .await?;
 
@@ -1035,7 +1017,6 @@ async fn relocation(relocated_peer_role: RelocatedPeerRole) -> Result<()> {
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
             )
             .await?;
 
@@ -1092,7 +1073,6 @@ async fn msg_to_self() -> Result<()> {
     // Run the local task set.
     local.run_until(async move {
         let info = gen_info(MIN_ADULT_AGE, None);
-        let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
         let (comm_tx, mut comm_rx) = mpsc::channel(TEST_EVENT_CHANNEL_SIZE);
         let comm = Comm::first_node(
             (Ipv4Addr::LOCALHOST, 0).into(),
@@ -1108,7 +1088,6 @@ async fn msg_to_self() -> Result<()> {
         let (node, _) = Node::first_node(
             comm.socket_addr(),
             info.keypair.clone(),
-            event_sender,
             genesis_sk_set,
         )
         .await?;
@@ -1124,12 +1103,7 @@ async fn msg_to_self() -> Result<()> {
         // don't use the cmd collection fn, as it skips Cmd::SendMsg
         let cmds = dispatcher
             .process_cmd(
-                Cmd::SendMsg {
-                    msg: OutgoingMsg::System(node_msg.clone()),
-                    msg_id: MsgId::new(),
-                    recipients: Peers::Single(info.peer()),
-                    #[cfg(feature = "traceroute")] traceroute: vec![],
-                },
+                Cmd::send_msg(OutgoingMsg::System(node_msg.clone()), Peers::Single(info.peer())),
             )
             .await?;
 
@@ -1156,140 +1130,147 @@ async fn handle_elders_update() -> Result<()> {
     let local = tokio::task::LocalSet::new();
 
     // Run the local task set.
-    local.run_until(async move {
+    local
+        .run_until(async move {
+            init_logger();
+            let _span = tracing::info_span!("handle_elders_update").entered();
+            // Start with section that has `elder_count()` elders with age 6, 1 non-elder with age 5 and one
+            // to-be-elder with age 7:
+            let info = gen_info(MIN_ADULT_AGE + 1, None);
+            let mut other_elder_peers: Vec<_> =
+                iter::repeat_with(|| create_peer(MIN_ADULT_AGE + 1))
+                    .take(elder_count() - 1)
+                    .collect();
+            let adult_peer = create_peer(MIN_ADULT_AGE);
+            let promoted_peer = create_peer(MIN_ADULT_AGE + 2);
 
-        init_logger();
-        let _span = tracing::info_span!("handle_elders_update").entered();
-        // Start with section that has `elder_count()` elders with age 6, 1 non-elder with age 5 and one
-        // to-be-elder with age 7:
-        let info = gen_info(MIN_ADULT_AGE + 1, None);
-        let mut other_elder_peers: Vec<_> = iter::repeat_with(|| create_peer(MIN_ADULT_AGE + 1))
-            .take(elder_count() - 1)
-            .collect();
-        let adult_peer = create_peer(MIN_ADULT_AGE);
-        let promoted_peer = create_peer(MIN_ADULT_AGE + 2);
+            let members = BTreeSet::from_iter(
+                [info.peer(), adult_peer, promoted_peer]
+                    .into_iter()
+                    .map(|p| NodeState::joined(p, None)),
+            );
 
-        let members = BTreeSet::from_iter(
-            [info.peer(), adult_peer, promoted_peer]
-                .into_iter()
-                .map(|p| NodeState::joined(p, None)),
-        );
+            let sk_set0 = SecretKeySet::random();
+            let pk0 = sk_set0.secret_key().public_key();
 
-        let sk_set0 = SecretKeySet::random();
-        let pk0 = sk_set0.secret_key().public_key();
+            let sap0 = SectionAuthorityProvider::new(
+                iter::once(info.peer()).chain(other_elder_peers.clone()),
+                Prefix::default(),
+                members.clone(),
+                sk_set0.public_keys(),
+                0,
+            );
 
-        let sap0 = SectionAuthorityProvider::new(
-            iter::once(info.peer()).chain(other_elder_peers.clone()),
-            Prefix::default(),
-            members.clone(),
-            sk_set0.public_keys(),
-            0,
-        );
+            let (section0, section_key_share) = create_section(&sk_set0, &sap0)?;
 
-        let (section0, section_key_share) = create_section(&sk_set0, &sap0)?;
-
-        for peer in [&adult_peer, &promoted_peer] {
-            let node_state = NodeState::joined(*peer, None);
-            let node_state = section_signed(sk_set0.secret_key(), node_state)?;
-            assert!(section0.update_member(node_state));
-        }
-
-        let demoted_peer = other_elder_peers.remove(0);
-
-        let sk_set1 = SecretKeySet::random();
-
-        let pk1 = sk_set1.secret_key().public_key();
-        // Create `HandleAgreement` cmd for an `NewElders` proposal. This will demote one of the
-        // current elders and promote the oldest peer.
-        let sap1 = SectionAuthorityProvider::new(
-            iter::once(info.peer())
-                .chain(other_elder_peers.clone())
-                .chain(iter::once(promoted_peer)),
-            Prefix::default(),
-            members,
-            sk_set1.public_keys(),
-            0,
-        );
-        let elder_names1: BTreeSet<_> = sap1.names();
-
-        let signed_sap1 = section_signed(sk_set1.secret_key(), sap1)?;
-        let proposal = Proposal::NewElders(signed_sap1.clone());
-        let signature = sk_set0.secret_key().sign(&proposal.as_signable_bytes()?);
-        let sig = KeyedSig {
-            signature,
-            public_key: pk0,
-        };
-
-        let (event_sender, mut event_receiver) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
-        let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
-        let used_space = UsedSpace::new(max_capacity);
-
-        let comm = create_comm().await?;
-        let mut node = Node::new(
-            comm.socket_addr(),
-            info.keypair.clone(),
-            section0.clone(),
-            Some(section_key_share),
-            event_sender,
-        )
-        .await?;
-
-        // Simulate DKG round finished succesfully by adding
-        // the new section key share to our cache
-        node.section_keys_provider
-            .insert(create_section_key_share(&sk_set1, 0));
-
-        let data = Data::new(root_storage_dir.as_path(), used_space)?;
-        let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
-
-        let cmds = run_and_collect_cmds(Cmd::HandleNewEldersAgreement { new_elders: signed_sap1, sig }, &dispatcher).await?;
-
-        let mut update_actual_recipients = HashSet::new();
-
-        for cmd in cmds {
-            let (msg, recipients) = match cmd {
-                Cmd::SendMsg {
-                    msg: OutgoingMsg::System(msg),
-                    recipients: Peers::Multiple(recipients),
-                    ..
-                } => (msg, recipients),
-                _ => continue,
-            };
-
-            let proof_chain = match msg {
-                SystemMsg::AntiEntropyUpdate { proof_chain, .. } => proof_chain,
-                _ => continue,
-            };
-
-            assert_eq!(proof_chain.last_key(), &pk1);
-
-            // Merging the section contained in the message with the original section succeeds.
-            // TODO: how to do this here?
-            // assert_matches!(section0.clone().merge(proof_chain.clone()), Ok(()));
-
-            update_actual_recipients.extend(recipients);
-        }
-
-        let update_expected_recipients: HashSet<_> = other_elder_peers
-            .into_iter()
-            .chain(iter::once(promoted_peer))
-            .chain(iter::once(demoted_peer))
-            .chain(iter::once(adult_peer))
-            .collect();
-
-        assert_eq!(update_actual_recipients, update_expected_recipients);
-
-        assert_matches!(
-            event_receiver.next().await,
-            Some(Event::Membership(MembershipEvent::EldersChanged { elders, .. })) => {
-                assert_eq!(elders.key, pk1);
-                assert_eq!(elder_names1, elders.added.union(&elders.remaining).copied().collect());
-                assert!(elders.removed.iter().all(|r| !elder_names1.contains(r)));
+            for peer in [&adult_peer, &promoted_peer] {
+                let node_state = NodeState::joined(*peer, None);
+                let node_state = section_signed(sk_set0.secret_key(), node_state)?;
+                assert!(section0.update_member(node_state));
             }
-        );
 
-       Result::<()>::Ok(())
-   }).await
+            let demoted_peer = other_elder_peers.remove(0);
+
+            let sk_set1 = SecretKeySet::random();
+
+            let pk1 = sk_set1.secret_key().public_key();
+            // Create `HandleAgreement` cmd for an `NewElders` proposal. This will demote one of the
+            // current elders and promote the oldest peer.
+            let sap1 = SectionAuthorityProvider::new(
+                iter::once(info.peer())
+                    .chain(other_elder_peers.clone())
+                    .chain(iter::once(promoted_peer)),
+                Prefix::default(),
+                members,
+                sk_set1.public_keys(),
+                0,
+            );
+            //let elder_names1: BTreeSet<_> = sap1.names();
+
+            let signed_sap1 = section_signed(sk_set1.secret_key(), sap1)?;
+            let proposal = Proposal::NewElders(signed_sap1.clone());
+            let signature = sk_set0.secret_key().sign(&proposal.as_signable_bytes()?);
+            let sig = KeyedSig {
+                signature,
+                public_key: pk0,
+            };
+
+            let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
+            let comm = create_comm().await?;
+            let mut node = Node::new(
+                comm.socket_addr(),
+                info.keypair.clone(),
+                section0.clone(),
+                Some(section_key_share),
+            )
+            .await?;
+
+            // Simulate DKG round finished succesfully by adding
+            // the new section key share to our cache
+            node.section_keys_provider
+                .insert(create_section_key_share(&sk_set1, 0));
+
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
+
+            let cmds = run_and_collect_cmds(
+                Cmd::HandleNewEldersAgreement {
+                    new_elders: signed_sap1,
+                    sig,
+                },
+                &dispatcher,
+            )
+            .await?;
+
+            let mut update_actual_recipients = HashSet::new();
+
+            for cmd in cmds {
+                let (msg, recipients) = match cmd {
+                    Cmd::SendMsg {
+                        msg: OutgoingMsg::System(msg),
+                        recipients: Peers::Multiple(recipients),
+                        ..
+                    } => (msg, recipients),
+                    _ => continue,
+                };
+
+                let proof_chain = match msg {
+                    SystemMsg::AntiEntropyUpdate { proof_chain, .. } => proof_chain,
+                    _ => continue,
+                };
+
+                assert_eq!(proof_chain.last_key(), &pk1);
+
+                // Merging the section contained in the message with the original section succeeds.
+                // TODO: how to do this here?
+                // assert_matches!(section0.clone().merge(proof_chain.clone()), Ok(()));
+
+                update_actual_recipients.extend(recipients);
+            }
+
+            let update_expected_recipients: HashSet<_> = other_elder_peers
+                .into_iter()
+                .chain(iter::once(promoted_peer))
+                .chain(iter::once(demoted_peer))
+                .chain(iter::once(adult_peer))
+                .collect();
+
+            assert_eq!(update_actual_recipients, update_expected_recipients);
+
+            // assert_matches!(
+            //     event_receiver.next().await,
+            //     Some(Event::Membership(MembershipEvent::EldersChanged { elders, .. })) => {
+            //         assert_eq!(elders.key, pk1);
+            //         assert_eq!(elder_names1, elders.added.union(&elders.remaining).copied().collect());
+            //         assert!(elders.removed.iter().all(|r| !elder_names1.contains(r)));
+            //     }
+            // );
+
+            Result::<()>::Ok(())
+        })
+        .await
 }
 
 // Test that demoted node still sends `Sync` messages on split.
@@ -1354,7 +1335,6 @@ async fn handle_demote_during_split() -> Result<()> {
             }
 
             // we make a new full node from info, to see what it does
-            let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let used_space = UsedSpace::new(max_capacity);
 
@@ -1364,7 +1344,6 @@ async fn handle_demote_during_split() -> Result<()> {
                 info.keypair.clone(),
                 section,
                 Some(section_key_share),
-                event_sender,
             )
             .await?;
 

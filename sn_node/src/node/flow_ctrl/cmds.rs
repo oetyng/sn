@@ -28,65 +28,11 @@ use std::{
     collections::BTreeSet,
     fmt,
     sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 #[cfg(feature = "traceroute")]
 use sn_interface::messaging::Entity;
-
-/// A struct for the job of controlling the flow
-/// of a [`Cmd`] in the system.
-///
-/// An id is assigned to it, its parent id (if any),
-/// a priority by which it is ordered in the queue
-/// among other pending cmd jobs, and the time the
-/// job was instantiated.
-#[derive(Debug, Clone)]
-pub struct CmdJob {
-    id: usize,
-    parent_id: Option<usize>,
-    cmd: Cmd,
-    priority: i32,
-    created_at: SystemTime,
-}
-
-impl CmdJob {
-    pub(crate) fn new(
-        id: usize,
-        parent_id: Option<usize>,
-        cmd: Cmd,
-        created_at: SystemTime,
-    ) -> Self {
-        let priority = cmd.priority();
-        Self {
-            id,
-            parent_id,
-            cmd,
-            priority,
-            created_at,
-        }
-    }
-
-    pub(crate) fn id(&self) -> usize {
-        self.id
-    }
-
-    pub(crate) fn parent_id(&self) -> Option<usize> {
-        self.parent_id
-    }
-
-    pub(crate) fn cmd(&self) -> &Cmd {
-        &self.cmd
-    }
-
-    pub(crate) fn priority(&self) -> i32 {
-        self.priority
-    }
-
-    pub(crate) fn created_at(&self) -> SystemTime {
-        self.created_at
-    }
-}
 
 /// Internal cmds for a node.
 ///
@@ -98,11 +44,8 @@ impl CmdJob {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum Cmd {
-    /// Cleanup node's PeerLinks, removing any unsused, unconnected peers
-    CleanupPeerLinks,
-    ///
-    #[allow(dead_code)]
-    HandleEvents(Vec<crate::node::Event>),
+    /// Start chain reaction based on something that happened.
+    HandleEvent(crate::node::Event),
     /// Validate `wire_msg` from `sender`.
     /// Holding the WireMsg that has been received from the network,
     ValidateMsg {
@@ -139,6 +82,8 @@ pub(crate) enum Cmd {
         #[cfg(feature = "traceroute")]
         traceroute: Vec<Entity>,
     },
+    /// Cleanup node's PeerLinks, removing any unsused, unconnected peers
+    CleanupPeerLinks,
     /// Handle a timeout previously scheduled with `ScheduleDkgTimeout`.
     HandleDkgTimeout(u64),
     /// Handle peer that's been detected as lost.
@@ -235,7 +180,7 @@ impl Cmd {
             TestConnectivity(_) => 8,
 
             Comm(_) => 7,
-            HandleEvents(_) => 5,
+            HandleEvent(_) => 5,
             Data(_) => 0,
 
             AddToPendingQueries { .. } => 6,
@@ -255,7 +200,7 @@ impl fmt::Display for Cmd {
             Cmd::CleanupPeerLinks => {
                 write!(f, "CleanupPeerLinks")
             }
-            Cmd::HandleEvents(_) => write!(f, "HandleEvents"),
+            Cmd::HandleEvent(_) => write!(f, "HandleEvent"),
             Cmd::HandleDkgTimeout(_) => write!(f, "HandleDkgTimeout"),
             Cmd::ScheduleDkgTimeout { .. } => write!(f, "ScheduleDkgTimeout"),
             #[cfg(not(feature = "test-utils"))]

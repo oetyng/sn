@@ -15,11 +15,8 @@ use crate::node::{
 };
 
 use sn_interface::{
-    messaging::{
-        system::{
-            JoinAsRelocatedRequest, JoinAsRelocatedResponse, NodeState, SectionAuth, SystemMsg,
-        },
-        MsgId,
+    messaging::system::{
+        JoinAsRelocatedRequest, JoinAsRelocatedResponse, NodeState, SectionAuth, SystemMsg,
     },
     network_knowledge::{NodeInfo, SectionAuthorityProvider},
     types::{keys::ed25519, Peer, PublicKey},
@@ -219,15 +216,10 @@ impl JoiningAsRelocated {
 
         info!("Sending {:?} to {:?}", join_request, recipients);
 
-        let cmd = Cmd::SendMsg {
-            msg: OutgoingMsg::System(SystemMsg::JoinAsRelocatedRequest(Box::new(join_request))),
-            msg_id: MsgId::new(),
-            recipients: Peers::Multiple(recipients),
-            #[cfg(feature = "traceroute")]
-            traceroute: vec![],
-        };
-
-        Ok(cmd)
+        Ok(Cmd::send_msg(
+            OutgoingMsg::System(SystemMsg::JoinAsRelocatedRequest(Box::new(join_request))),
+            Peers::Multiple(recipients),
+        ))
     }
 
     fn check_autority_provider(

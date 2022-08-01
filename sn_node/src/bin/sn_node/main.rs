@@ -27,12 +27,14 @@
     unused_results
 )]
 
-use sn_node::node::{start_node, Config, Error as NodeError, Event, MembershipEvent};
+use sn_node::node::{start_node, Config, Error as NodeError};
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use color_eyre::{Section, SectionExt};
-use eyre::{eyre, Context, ErrReport, Result};
+#[cfg(feature = "chaos")]
+use eyre::ErrReport;
+use eyre::{eyre, Context, Result};
 use self_update::{cargo_crate_version, Status};
 use std::{io::Write, process::exit};
 use tokio::time::{sleep, Duration};
@@ -129,7 +131,7 @@ async fn run_node(config: &Config) -> Result<()> {
     let join_timeout = Duration::from_secs(JOIN_TIMEOUT_SEC);
     let bootstrap_retry_duration = Duration::from_secs(BOOTSTRAP_RETRY_TIME_SEC);
 
-    let (_ref, mut event_stream) = loop {
+    let mut runner = loop {
         match start_node(config, join_timeout).await {
             Ok(result) => break result,
             Err(NodeError::CannotConnectEndpoint(qp2p::EndpointError::Upnp(error))) => {
@@ -203,12 +205,13 @@ async fn run_node(config: &Config) -> Result<()> {
         }
     }
 
-    // This loop keeps the node going
-    while let Some(event) = event_stream.next().await {
-        trace!("Node event! {}", event);
-        if let Event::Membership(MembershipEvent::ChurnJoinMissError) = event {
-            return Err(NodeError::ChurnJoinMiss).map_err(ErrReport::msg);
-        }
+    // This blocks until the node stops running.
+    // runner.start().await;
+    while let Some(log) = runner.await_next_log().await {
+        trace!("Node log {}", log);
+        // if let Event::Membership(MembershipEvent::ChurnJoinMissError) = log {
+        //     return Err(NodeError::ChurnJoinMiss).map_err(ErrReport::msg);
+        // }
     }
 
     Ok(())

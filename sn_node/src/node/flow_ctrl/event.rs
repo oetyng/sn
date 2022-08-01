@@ -6,16 +6,13 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::cmds::CmdJob;
-
 use sn_interface::messaging::{
     data::ServiceMsg, system::SystemMsg, AuthorityProof, Dst, EndUser, MsgId, NodeAuth, ServiceAuth,
 };
 
 use bls::PublicKey as BlsPublicKey;
-use chrono::{DateTime, Utc};
 use ed25519_dalek::Keypair;
-use std::{collections::BTreeSet, sync::Arc, time::SystemTime};
+use std::{collections::BTreeSet, sync::Arc};
 use xor_name::{Prefix, XorName};
 
 /// Node-internal events raised via its event sender.
@@ -36,8 +33,6 @@ pub enum Event {
     Messaging(MessagingEvent),
     ///
     Membership(MembershipEvent),
-    ///
-    CmdProcessing(CmdProcessEvent),
 }
 
 /// Informing on incoming msgs.
@@ -71,45 +66,6 @@ pub enum MessagingEvent {
         user: EndUser,
         /// Dst of the msg
         dst: Dst,
-    },
-}
-
-/// Informing on the processing of an individual cmd.
-#[derive(custom_debug::Debug, Clone)]
-pub enum CmdProcessEvent {
-    ///
-    Started {
-        ///
-        job: CmdJob,
-        ///
-        time: SystemTime,
-    },
-    ///
-    Retrying {
-        ///
-        job: CmdJob,
-        ///
-        retry: usize,
-        ///
-        time: SystemTime,
-    },
-    ///
-    Finished {
-        ///
-        job: CmdJob,
-        ///
-        time: SystemTime,
-    },
-    ///
-    Failed {
-        ///
-        job: CmdJob,
-        ///
-        retry: usize,
-        ///
-        time: SystemTime,
-        ///
-        error: String,
     },
 }
 
@@ -182,70 +138,6 @@ impl std::fmt::Display for Event {
             Self::Data(e) => write!(f, "{:?}", e),
             Self::Messaging(e) => write!(f, "{:?}", e),
             Self::Membership(e) => write!(f, "{:?}", e),
-            Self::CmdProcessing(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::fmt::Display for CmdProcessEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Started { job, time } => {
-                let cmd = job.cmd();
-                let queued_for = time
-                    .duration_since(job.created_at())
-                    .unwrap_or_default()
-                    .as_millis();
-                let time: DateTime<Utc> = (*time).into();
-                write!(
-                    f,
-                    "{}: Started id: {}, parent: {:?} prio: {}, queued for {} ms. Cmd: {}",
-                    time.to_rfc3339(),
-                    job.id(),
-                    job.parent_id(),
-                    job.priority(),
-                    queued_for,
-                    cmd,
-                )
-            }
-            Self::Retrying { job, retry, time } => {
-                let time: DateTime<Utc> = (*time).into();
-                write!(
-                    f,
-                    "{}: Retry #{} of id: {}, prio: {}",
-                    time.to_rfc3339(),
-                    retry,
-                    job.id(),
-                    job.priority(),
-                )
-            }
-            Self::Finished { job, time } => {
-                let time: DateTime<Utc> = (*time).into();
-                write!(
-                    f,
-                    "{}: Finished id: {}, prio: {}",
-                    time.to_rfc3339(),
-                    job.id(),
-                    job.priority(),
-                )
-            }
-            Self::Failed {
-                job,
-                retry,
-                time,
-                error,
-            } => {
-                let time: DateTime<Utc> = (*time).into();
-                write!(
-                    f,
-                    "{}: Failed id: {}, prio: {}, on try #{}, due to: {}",
-                    time.to_rfc3339(),
-                    job.id(),
-                    job.priority(),
-                    retry,
-                    error,
-                )
-            }
         }
     }
 }

@@ -7,6 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 pub(crate) mod cmd_ctrl;
+pub(crate) mod cmd_job;
 pub(crate) mod cmds;
 pub(super) mod dispatcher;
 pub(super) mod event;
@@ -56,21 +57,46 @@ pub(crate) struct FlowCtrl {
 impl FlowCtrl {
     pub(crate) fn new(cmd_ctrl: CmdCtrl, incoming_conns: mpsc::Receiver<MsgEvent>) -> Self {
         let node = cmd_ctrl.node();
-        let ctrl = Self { cmd_ctrl, node };
 
-        ctrl.clone().start_connection_listening(incoming_conns);
-        ctrl.clone().start_network_probing();
-        ctrl.clone().start_running_health_checks();
-        ctrl.clone().start_checking_for_missed_votes();
-        ctrl.clone().start_section_probing();
-        ctrl.clone().start_data_replication();
-        ctrl.clone().start_dysfunction_detection();
-        ctrl.clone().start_cleaning_peer_links();
+        let flow_ctrl = Self { cmd_ctrl, node };
+
+        flow_ctrl.clone().start_connection_listening(incoming_conns);
+        flow_ctrl.clone().start_network_probing();
+        flow_ctrl.clone().start_running_health_checks();
+        flow_ctrl.clone().start_checking_for_missed_votes();
+        flow_ctrl.clone().start_section_probing();
+        flow_ctrl.clone().start_data_replication();
+        flow_ctrl.clone().start_dysfunction_detection();
+        flow_ctrl.clone().start_cleaning_peer_links();
         #[cfg(feature = "back-pressure")]
-        ctrl.clone().start_backpressure_reporting();
+        flow_ctrl.clone().start_backpressure_reporting();
 
-        ctrl
+        let cmd_ctrl = flow_ctrl.cmd_ctrl.clone();
+        let _ = tokio::task::spawn_local(async move { cmd_ctrl.start().await });
+
+        flow_ctrl
     }
+
+    // /// Blocks until cmd_ctrl stops.
+    // ///
+    // /// Option param is a temp hack.
+    // pub(crate) async fn start(&self, incoming_conns: Option<mpsc::Receiver<MsgEvent>>) {
+    //     // temp hack
+    //     if let Some(incoming_conns) = incoming_conns {
+    //         self.clone().start_connection_listening(incoming_conns);
+    //     }
+    //     self.clone().start_network_probing();
+    //     self.clone().start_running_health_checks();
+    //     self.clone().start_checking_for_missed_votes();
+    //     self.clone().start_section_probing();
+    //     self.clone().start_data_replication();
+    //     self.clone().start_dysfunction_detection();
+    //     self.clone().start_cleaning_peer_links();
+    //     #[cfg(feature = "back-pressure")]
+    //     self.clone().start_backpressure_reporting();
+
+    //     self.cmd_ctrl.start().await
+    // }
 
     /// Does not await the completion of the cmd.
     pub(crate) async fn fire_and_forget(&self, cmd: Cmd) -> Result<()> {

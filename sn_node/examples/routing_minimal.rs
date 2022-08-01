@@ -34,8 +34,8 @@
 //!
 
 use sn_node::node::{
-    cfg::create_test_max_capacity_and_root_storage, new_test_api, Config, Event, EventReceiver,
-    MembershipEvent, MessagingEvent, NodeTestApi as NodeApi,
+    cfg::create_test_max_capacity_and_root_storage, new_test_api, Config, Event, MembershipEvent,
+    MessagingEvent, NodeTestApi as NodeApi, TestEventReceiver as EventReceiver,
 };
 
 use clap::Parser;

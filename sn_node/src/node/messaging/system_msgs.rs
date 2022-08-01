@@ -232,7 +232,7 @@ impl Node {
                     msgs_per_s,
                 })])
             }
-            // The AcceptedOnlineShare for relocation will be received here.
+            // The aggregated approval for relocation will be received here.
             SystemMsg::JoinResponse(join_response) => {
                 match *join_response {
                     JoinResponse::Approved {
@@ -240,59 +240,46 @@ impl Node {
                         section_chain,
                         ..
                     } => {
-                        info!(
-                            "Relocation: Aggregating received ApprovalShare from {:?}",
-                            sender
-                        );
                         info!("Relocation: Successfully aggregated ApprovalShares for joining the network");
 
-                        if let Some(ref mut joining_as_relocated) = self.relocate_state {
-                            let new_node = joining_as_relocated.node.clone();
-                            let new_name = new_node.name();
-                            let previous_name = self.name();
-                            let new_keypair = new_node.keypair.clone();
+                        let joining_as_relocated = match self.relocate_state {
+                            Some(ref mut state) => state,
+                            None => {
+                                warn!("Relocation: self.relocate_state is not in Progress");
+                                return Ok(vec![]);
+                            }
+                        };
 
-                            info!(
-                                "Relocation: switching from {:?} to {:?}",
-                                previous_name, new_name
-                            );
+                        let new_node = joining_as_relocated.node.clone();
+                        let new_name = new_node.name();
+                        let previous_name = self.name();
+                        let new_keypair = new_node.keypair;
 
-                            let genesis_key = *self.network_knowledge.genesis_key();
-                            let prefix_map = self.network_knowledge.prefix_map().clone();
+                        info!(
+                            "Relocation: switching from {:?} to {:?}",
+                            previous_name, new_name
+                        );
 
-                            let recipients = section_auth.value.elders.clone();
+                        let genesis_key = *self.network_knowledge.genesis_key();
+                        let prefix_map = self.network_knowledge.prefix_map().clone();
 
-                            let new_network_knowledge = NetworkKnowledge::new(
-                                genesis_key,
-                                section_chain,
-                                section_auth.into_authed_state(),
-                                Some(prefix_map),
-                            )?;
+                        let new_network_knowledge = NetworkKnowledge::new(
+                            genesis_key,
+                            section_chain,
+                            section_auth.into_authed_state(),
+                            Some(prefix_map),
+                        )?;
 
-                            // TODO: confirm whether carry out the switch immediately here
-                            //       or still using the cmd pattern.
-                            //       As the sending of the JoinRequest as notification
-                            //       may require the `node` to be switched to new already.
+                        self.relocate(new_keypair.clone(), new_network_knowledge)?;
 
-                            self.relocate(new_keypair.clone(), new_network_knowledge)?;
+                        trace!("{}", LogMarker::RelocateEnd);
 
-                            trace!(
-                                "Relocation: Sending aggregated JoinRequest to {:?}",
-                                recipients
-                            );
-
-                            self.send_event(Event::Membership(MembershipEvent::Relocated {
+                        Ok(vec![Cmd::HandleEvent(Event::Membership(
+                            MembershipEvent::Relocated {
                                 previous_name,
                                 new_keypair,
-                            }))
-                            .await;
-
-                            trace!("{}", LogMarker::RelocateEnd);
-                        } else {
-                            warn!("Relocation:  self.relocate_state is not in Progress");
-                        }
-
-                        Ok(vec![])
+                            },
+                        ))])
                     }
                     _ => {
                         debug!("Relocation: Ignoring unexpected join response message: {join_response:?}");

@@ -243,15 +243,13 @@ impl Node {
 
         info!("handle Online: {}", new_info.peer());
 
-        // still used for testing
-        self.send_event(Event::Membership(MembershipEvent::MemberJoined {
-            name: new_info.name(),
-            previous_name: new_info.previous_name(),
-            age: new_info.age(),
-        }))
-        .await;
-
-        vec![]
+        vec![Cmd::HandleEvent(Event::Membership(
+            MembershipEvent::MemberJoined {
+                name: new_info.name(),
+                previous_name: new_info.previous_name(),
+                age: new_info.age(),
+            },
+        ))]
     }
 
     // Send `NodeApproval` to a joining node which makes it a section member

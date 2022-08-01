@@ -37,10 +37,7 @@ use self::{
         MAX_WAITING_PEERS_PER_QUERY, RESOURCE_PROOF_DATA_SIZE, RESOURCE_PROOF_DIFFICULTY,
     },
     data_records::MIN_LEVEL_WHEN_FULL,
-    flow_ctrl::{
-        cmds::Cmd,
-        event::{CmdProcessEvent, Elders},
-    },
+    flow_ctrl::{cmds::Cmd, event::Elders},
     proposal::Proposal,
 };
 
@@ -48,11 +45,12 @@ pub use self::{
     cfg::config_handler::Config,
     error::{Error, Result},
     flow_ctrl::{
+        cmd_job::{CmdJob, CmdProcessLog},
         event::{Event, MembershipEvent, MessagingEvent, NodeElderChange},
         event_channel::EventReceiver,
     },
     node_starter::{new_test_api, start_node},
-    node_test_api::NodeTestApi,
+    node_test_api::{NodeTestApi, TestEventReceiver},
 };
 
 pub(crate) use self::monitoring::RateLimits;
@@ -72,7 +70,7 @@ mod core {
         bootstrap::JoiningAsRelocated,
         data_records::Capacity,
         dkg::DkgVoter,
-        flow_ctrl::{cmds::Cmd, event_channel::EventSender},
+        flow_ctrl::cmds::Cmd,
         handover::Handover,
         membership::{elder_candidates, try_split_dkg, Membership},
         messaging::Peers,
@@ -143,7 +141,6 @@ mod core {
 
     pub(crate) struct Node {
         pub(crate) addr: SocketAddr, // does this change? if so... when? only at node start atm?
-        pub(crate) event_sender: EventSender,
         pub(crate) keypair: Arc<Keypair>,
         pub(crate) resource_proof: ResourceProof,
         // Network resources
@@ -177,7 +174,6 @@ mod core {
             keypair: Arc<Keypair>,
             network_knowledge: NetworkKnowledge,
             section_key_share: Option<SectionKeyShare>,
-            event_sender: EventSender,
         ) -> Result<Self> {
             let membership = if let Some(key) = section_key_share.clone() {
                 let n_elders = network_knowledge
@@ -240,7 +236,6 @@ mod core {
                 message_aggregator: SignatureAggregator::default(),
                 dkg_voter: DkgVoter::default(),
                 relocate_state: None,
-                event_sender,
                 handover_voting: handover,
                 joins_allowed: true,
                 resource_proof: ResourceProof::new(
@@ -625,8 +620,6 @@ mod core {
                 NodeElderChange::None
             };
 
-            let mut events = vec![];
-
             let new_elders = !elders.added.is_empty();
             let section_split = new.prefix != old.prefix;
             let elders_changed = !elders.added.is_empty() || !elders.removed.is_empty();
@@ -649,17 +642,21 @@ mod core {
 
                 // During the split, sibling's SAP could be unknown to us yet.
                 // Hence, fire the SectionSplit event whenever detect a prefix change.
-                events.push(Event::Membership(MembershipEvent::SectionSplit {
-                    elders: elders.clone(),
-                    self_status_change,
-                }))
+                cmds.push(Cmd::HandleEvent(Event::Membership(
+                    MembershipEvent::SectionSplit {
+                        elders: elders.clone(),
+                        self_status_change,
+                    },
+                )));
             };
 
             if !section_split && elders_changed {
-                events.push(Event::Membership(MembershipEvent::EldersChanged {
-                    elders,
-                    self_status_change,
-                }))
+                cmds.push(Cmd::HandleEvent(Event::Membership(
+                    MembershipEvent::EldersChanged {
+                        elders,
+                        self_status_change,
+                    },
+                )));
             }
 
             // update new elders if we were an elder (regardless if still or not)
@@ -676,10 +673,6 @@ mod core {
                     ),
                 );
             };
-
-            for event in events {
-                self.send_event(event).await
-            }
 
             Ok(cmds)
         }

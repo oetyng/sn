@@ -9,13 +9,9 @@
 use crate::node::{
     flow_ctrl::cmds::Cmd,
     messaging::{OutgoingMsg, Peers},
-    Error, Event, MembershipEvent, Node, Result, StateSnapshot,
+    Error, Node, Result, StateSnapshot,
 };
-use backoff::{backoff::Backoff, ExponentialBackoff};
-use bls::PublicKey as BlsPublicKey;
-use bytes::Bytes;
-use itertools::Itertools;
-use secured_linked_list::SecuredLinkedList;
+
 use sn_interface::{
     messaging::{
         system::{KeyedSig, NodeCmd, SectionAuth, SectionPeers, SystemMsg},
@@ -24,6 +20,12 @@ use sn_interface::{
     network_knowledge::SectionAuthorityProvider,
     types::{log_markers::LogMarker, Peer, PublicKey},
 };
+
+use backoff::{backoff::Backoff, ExponentialBackoff};
+use bls::PublicKey as BlsPublicKey;
+use bytes::Bytes;
+use itertools::Itertools;
+use secured_linked_list::SecuredLinkedList;
 use std::{collections::BTreeSet, time::Duration};
 use xor_name::{Prefix, XorName};
 
@@ -335,8 +337,8 @@ impl Node {
 
             if was_in_ancestor_section && prefix_matches_our_name && !is_in_current_section {
                 error!("Detected churn join miss while processing msg ({:?}), was in section {:?}, updated to {:?}, wasn't in members anymore even if name matches: {:?}", msg_id, our_section_prefix, prefix, our_name);
-                self.send_event(Event::Membership(MembershipEvent::ChurnJoinMissError))
-                    .await;
+                // self.send_event(Event::Membership(MembershipEvent::ChurnJoinMissError))
+                //     .await;
                 return Err(Error::ChurnJoinMiss);
             }
         }
@@ -533,10 +535,7 @@ impl Node {
 mod tests {
     use super::*;
 
-    use crate::node::{
-        flow_ctrl::{event_channel, tests::create_comm},
-        MIN_ADULT_AGE,
-    };
+    use crate::node::{flow_ctrl::tests::create_comm, MIN_ADULT_AGE};
 
     use sn_interface::{
         elder_count,
@@ -812,7 +811,6 @@ mod tests {
             let (mut node, _) = Node::first_node(
                 create_comm().await?.socket_addr(),
                 info.keypair.clone(),
-                event_channel::new(1).0,
                 genesis_sk_set.clone(),
             )
             .await?;

@@ -8,11 +8,11 @@
 
 use crate::node::{
     flow_ctrl::{
-        cmds::{Cmd, CmdJob},
+        cmd_job::{CmdJob, CmdProcessLog},
+        cmds::Cmd,
         dispatcher::Dispatcher,
-        event_channel::EventSender,
     },
-    CmdProcessEvent, Error, Event, RateLimits, Result,
+    Error, RateLimits, Result,
 };
 
 use custom_debug::Debug;
@@ -26,6 +26,8 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::RwLock, time::Instant};
+
+use super::event_channel::EventSender;
 
 type Priority = i32;
 
@@ -46,35 +48,35 @@ const ORDER: Ordering = Ordering::SeqCst;
 /// and start with the most important things first".
 #[derive(Clone)]
 pub(crate) struct CmdCtrl {
+    pub(crate) dispatcher: Arc<Dispatcher>,
     cmd_queue: Arc<RwLock<PriorityQueue<EnqueuedJob, Priority>>>,
     attempted: MsgThroughput,
     monitoring: RateLimits,
     stopped: Arc<RwLock<bool>>,
-    pub(crate) dispatcher: Arc<Dispatcher>,
     id_counter: Arc<AtomicUsize>,
-    event_sender: EventSender,
+    event_sender: EventSender<CmdProcessLog>,
 }
 
 impl CmdCtrl {
     pub(crate) fn new(
         dispatcher: Dispatcher,
         monitoring: RateLimits,
-        event_sender: EventSender,
+        event_sender: EventSender<CmdProcessLog>,
     ) -> Self {
-        let session = Self {
+        Self {
+            dispatcher: Arc::new(dispatcher),
             cmd_queue: Arc::new(RwLock::new(PriorityQueue::new())),
             attempted: MsgThroughput::default(),
             monitoring,
             stopped: Arc::new(RwLock::new(false)),
-            dispatcher: Arc::new(dispatcher),
             id_counter: Arc::new(AtomicUsize::new(0)),
             event_sender,
-        };
+        }
+    }
 
-        let session_clone = session.clone();
-        let _ = tokio::task::spawn_local(async move { session_clone.keep_sending().await });
-
-        session
+    /// Blocks until self.stop() is called.
+    pub(crate) async fn start(&self) {
+        self.keep_sending().await
     }
 
     pub(crate) fn node(&self) -> Arc<RwLock<crate::node::Node>> {
@@ -87,7 +89,6 @@ impl CmdCtrl {
 
     // consume self
     // NB that clones could still exist, however they would be in the disconnected state
-    #[allow(unused)]
     pub(crate) async fn stop(self) {
         *self.stopped.write().await = true;
         self.cmd_queue.write().await.clear();
@@ -134,8 +135,8 @@ impl CmdCtrl {
         *self.stopped.read().await
     }
 
-    async fn notify(&self, event: Event) {
-        self.event_sender.send(event).await
+    async fn notify(&self, log: CmdProcessLog) {
+        self.event_sender.send(log).await
     }
 
     async fn keep_sending(&self) {
@@ -175,25 +176,23 @@ impl CmdCtrl {
 
                     continue; // this means we will drop this cmd entirely!
                 }
-                let clone = self.clone();
+                let ctrl = self.clone();
                 let _ = tokio::task::spawn_local(async move {
                     if enqueued.retries == 0 {
-                        clone
-                            .notify(Event::CmdProcessing(CmdProcessEvent::Started {
-                                job: enqueued.job.clone(),
-                                time: SystemTime::now(),
-                            }))
-                            .await;
+                        ctrl.notify(CmdProcessLog::Started {
+                            job: enqueued.job.clone(),
+                            time: SystemTime::now(),
+                        })
+                        .await;
                     } else {
-                        clone
-                            .notify(Event::CmdProcessing(CmdProcessEvent::Retrying {
-                                job: enqueued.job.clone(),
-                                retry: enqueued.retries,
-                                time: SystemTime::now(),
-                            }))
-                            .await;
+                        ctrl.notify(CmdProcessLog::Retrying {
+                            job: enqueued.job.clone(),
+                            retry: enqueued.retries,
+                            time: SystemTime::now(),
+                        })
+                        .await;
                     }
-                    match clone
+                    match ctrl
                         .dispatcher
                         .process_cmd(enqueued.job.cmd().clone())
                         .await
@@ -201,32 +200,31 @@ impl CmdCtrl {
                         Ok(cmds) => {
                             enqueued.reporter.send(CtrlStatus::Finished);
 
-                            clone.monitoring.increment_cmds().await;
+                            ctrl.monitoring.increment_cmds().await;
 
                             // evaluate: handle these watchers?
-                            let _watchers = clone.extend(cmds, enqueued.job.id()).await;
-                            clone
-                                .notify(Event::CmdProcessing(CmdProcessEvent::Finished {
-                                    job: enqueued.job,
-                                    time: SystemTime::now(),
-                                }))
-                                .await;
+                            let _watchers = ctrl.extend(cmds, enqueued.job.id()).await;
+                            ctrl.notify(CmdProcessLog::Finished {
+                                job: enqueued.job,
+                                time: SystemTime::now(),
+                            })
+                            .await;
                         }
+                        Err(Error::ChurnJoinMiss) => ctrl.clone().stop().await,
                         Err(error) => {
-                            clone
-                                .notify(Event::CmdProcessing(CmdProcessEvent::Failed {
-                                    job: enqueued.job.clone(),
-                                    retry: enqueued.retries,
-                                    time: SystemTime::now(),
-                                    error: format!("{:?}", error),
-                                }))
-                                .await;
+                            ctrl.notify(CmdProcessLog::Failed {
+                                job: enqueued.job.clone(),
+                                retry: enqueued.retries,
+                                time: SystemTime::now(),
+                                error: format!("{:?}", error),
+                            })
+                            .await;
                             enqueued.retries += 1;
                             enqueued.reporter.send(CtrlStatus::Error(Arc::new(error)));
-                            let _ = clone.cmd_queue.write().await.push(enqueued, prio);
+                            let _ = ctrl.cmd_queue.write().await.push(enqueued, prio);
                         }
                     }
-                    clone.attempted.increment(); // both on fail and success
+                    ctrl.attempted.increment(); // both on fail and success
                 });
             }
         }

@@ -60,7 +60,7 @@ impl Node {
     pub(crate) async fn handle_relocate(
         &mut self,
         relocate_proof: SectionAuth<NodeStateMsg>,
-    ) -> Result<Option<Cmd>> {
+    ) -> Result<Vec<Cmd>> {
         let (dst_xorname, dst_section_key, new_age) =
             if let MembershipState::Relocated(ref relocate_details) = relocate_proof.value.state {
                 (
@@ -73,14 +73,14 @@ impl Node {
                     "Ignoring Relocate msg containing invalid NodeState: {:?}",
                     relocate_proof.state
                 );
-                return Ok(None);
+                return Ok(vec![]);
             };
 
         let node = self.info();
         if dst_xorname != node.name() {
             // This `Relocate` message is not for us - it's most likely a duplicate of a previous
             // message that we already handled.
-            return Ok(None);
+            return Ok(vec![]);
         }
 
         debug!(
@@ -88,17 +88,20 @@ impl Node {
             dst_xorname
         );
 
+        let mut cmds = vec![];
+
         match self.relocate_state {
             Some(_) => {
                 trace!("Ignore Relocate - relocation already in progress");
-                return Ok(None);
+                return Ok(vec![]);
             }
             None => {
                 trace!("{}", LogMarker::RelocateStart);
-                self.send_event(Event::Membership(MembershipEvent::RelocationStarted {
-                    previous_name: node.name(),
-                }))
-                .await;
+                cmds.push(Cmd::HandleEvent(Event::Membership(
+                    MembershipEvent::RelocationStarted {
+                        previous_name: node.name(),
+                    },
+                )));
             }
         }
 
@@ -121,6 +124,8 @@ impl Node {
 
         self.relocate_state = Some(Box::new(joining_as_relocated));
 
-        Ok(Some(cmd))
+        cmds.push(cmd);
+
+        Ok(cmds)
     }
 }

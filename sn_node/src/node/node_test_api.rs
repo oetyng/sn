@@ -8,10 +8,7 @@
 
 use crate::node::{flow_ctrl::FlowCtrl, Node, Peer, Result};
 
-use sn_interface::{
-    messaging::{system::SystemMsg, MsgId},
-    network_knowledge::SectionAuthorityProvider,
-};
+use sn_interface::{messaging::system::SystemMsg, network_knowledge::SectionAuthorityProvider};
 
 use ed25519_dalek::PublicKey;
 use secured_linked_list::SecuredLinkedList;
@@ -22,6 +19,7 @@ use xor_name::{Prefix, XorName};
 use super::{
     flow_ctrl::cmds::Cmd,
     messaging::{OutgoingMsg, Peers},
+    CmdProcessLog, Event, EventReceiver,
 };
 
 /// Test interface for sending and receiving messages to and from other nodes.
@@ -97,14 +95,11 @@ impl NodeTestApi {
 
     /// Send a system msg.
     pub async fn send(&self, msg: SystemMsg, recipients: BTreeSet<Peer>) -> Result<()> {
-        let cmd = Cmd::SendMsg {
-            msg: OutgoingMsg::System(msg),
-            msg_id: MsgId::new(),
-            recipients: Peers::Multiple(recipients),
-            #[cfg(feature = "traceroute")]
-            traceroute: vec![],
-        };
-        self.send_cmd(cmd).await
+        self.send_cmd(Cmd::send_msg(
+            OutgoingMsg::System(msg),
+            Peers::Multiple(recipients),
+        ))
+        .await
     }
 
     /// Send a cmd.
@@ -116,5 +111,32 @@ impl NodeTestApi {
     /// `Error::MissingSecretKeyShare` otherwise.
     pub async fn public_key_set(&self) -> Result<bls::PublicKeySet> {
         self.node.read().await.public_key_set()
+    }
+}
+
+/// Test interface for receiving Events from the system.
+#[allow(missing_debug_implementations)]
+pub struct TestEventReceiver {
+    event_receiver: EventReceiver<CmdProcessLog>,
+}
+
+impl TestEventReceiver {
+    pub(crate) fn new(event_receiver: EventReceiver<CmdProcessLog>) -> Self {
+        Self { event_receiver }
+    }
+
+    /// Waits for, and then returns next event.
+    pub async fn next(&mut self) -> Option<Event> {
+        while let Some(event) = self.event_receiver.next().await {
+            let job = match event {
+                CmdProcessLog::Started { job, .. } => job,
+                _ => continue,
+            };
+            match job.cmd() {
+                Cmd::HandleEvent(event) => return Some(event.clone()),
+                _ => continue,
+            }
+        }
+        None
     }
 }

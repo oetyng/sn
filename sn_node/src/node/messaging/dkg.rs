@@ -16,7 +16,7 @@ use bytes::Bytes;
 use sn_interface::{
     messaging::{
         system::{DkgFailureSig, DkgFailureSigSet, DkgSessionId, SigShare, SystemMsg},
-        AuthorityProof, BlsShareAuth, MsgId, NodeMsgAuthority, WireMsg,
+        AuthorityProof, BlsShareAuth, NodeMsgAuthority, WireMsg,
     },
     network_knowledge::{SectionAuthorityProvider, SectionKeyShare},
     types::{log_markers::LogMarker, Peer},
@@ -59,13 +59,10 @@ impl Node {
         let (auth, payload) = self.get_auth(msg.clone(), src_name)?;
 
         if !others.is_empty() {
-            cmds.push(Cmd::SendMsg {
-                msg: OutgoingMsg::DstAggregated((auth.clone(), payload.clone())),
-                msg_id: MsgId::new(),
-                recipients: Peers::Multiple(others),
-                #[cfg(feature = "traceroute")]
-                traceroute: vec![],
-            });
+            cmds.push(Cmd::send_msg(
+                OutgoingMsg::DstAggregated((auth.clone(), payload.clone())),
+                Peers::Multiple(others),
+            ));
         }
 
         if handle {

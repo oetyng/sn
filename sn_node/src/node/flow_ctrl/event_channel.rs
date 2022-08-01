@@ -6,10 +6,9 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::node::Event;
 use tokio::sync::mpsc;
 
-pub(crate) fn new(channel_size: usize) -> (EventSender, EventReceiver) {
+pub(crate) fn new<T>(channel_size: usize) -> (EventSender<T>, EventReceiver<T>) {
     let (event_sender, event_receiver) = mpsc::channel(channel_size);
     (
         EventSender { event_sender },
@@ -17,16 +16,16 @@ pub(crate) fn new(channel_size: usize) -> (EventSender, EventReceiver) {
     )
 }
 
-/// Sender for [`crate::node::Node`] events
+/// Sender for arbitrary events.
 #[derive(Clone)]
-pub(crate) struct EventSender {
-    event_sender: mpsc::Sender<Event>,
+pub(crate) struct EventSender<T> {
+    event_sender: mpsc::Sender<T>,
 }
 
-impl EventSender {
+impl<T> EventSender<T> {
     /// Sends the event.
     /// Currently ignoring if receiver end is closed or dropped.
-    pub(crate) async fn send(&self, event: Event) {
+    pub(crate) async fn send(&self, event: T) {
         if self.event_sender.send(event).await.is_err() {
             error!("Event receiver has been closed");
         }
@@ -35,18 +34,18 @@ impl EventSender {
 
 /// Receiver of events
 #[allow(missing_debug_implementations)]
-pub struct EventReceiver {
-    event_receiver: mpsc::Receiver<Event>,
+pub struct EventReceiver<T> {
+    event_receiver: mpsc::Receiver<T>,
 }
 
-impl EventReceiver {
-    /// Waits for, and then returns next event
-    pub async fn next(&mut self) -> Option<Event> {
+impl<T> EventReceiver<T> {
+    /// Waits for, and then returns next event.
+    pub async fn next(&mut self) -> Option<T> {
         self.event_receiver.recv().await
     }
 
-    /// Returns next event if any, else None
-    pub fn try_next(&mut self) -> Option<Event> {
+    /// Returns next event if any, else None.
+    pub fn try_next(&mut self) -> Option<T> {
         if let Ok(event) = self.event_receiver.try_recv() {
             Some(event)
         } else {

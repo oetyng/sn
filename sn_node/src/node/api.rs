@@ -6,11 +6,13 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::node::{
-    flow_ctrl::{cmds::Cmd, event_channel::EventSender},
-    Error, Event, Node, Result, GENESIS_DBC_AMOUNT,
-};
+use crate::node::{flow_ctrl::cmds::Cmd, Error, Node, Result, GENESIS_DBC_AMOUNT};
 
+use sn_dbc::{
+    bls_ringct::{bls_bulletproofs::PedersenGens, group::Curve},
+    rng, Dbc, Hash, IndexedSignatureShare, MlsagMaterial, Owner, OwnerOnce, RevealedCommitment,
+    SpentProofContent, SpentProofShare, TransactionBuilder, TrueInput,
+};
 use sn_interface::{
     network_knowledge::{NetworkKnowledge, NodeInfo, SectionAuthorityProvider, SectionKeyShare},
     types::log_markers::LogMarker,
@@ -18,11 +20,6 @@ use sn_interface::{
 
 use ed25519_dalek::Keypair;
 use secured_linked_list::SecuredLinkedList;
-use sn_dbc::{
-    bls_ringct::{bls_bulletproofs::PedersenGens, group::Curve},
-    rng, Dbc, Hash, IndexedSignatureShare, MlsagMaterial, Owner, OwnerOnce, RevealedCommitment,
-    SpentProofContent, SpentProofShare, TransactionBuilder, TrueInput,
-};
 use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 use xor_name::XorName;
 
@@ -30,7 +27,6 @@ impl Node {
     pub(crate) async fn first_node(
         our_addr: SocketAddr,
         keypair: Arc<Keypair>,
-        event_sender: EventSender,
         genesis_sk_set: bls::SecretKeySet,
     ) -> Result<(Self, Dbc)> {
         let info = NodeInfo {
@@ -49,7 +45,6 @@ impl Node {
             keypair.clone(),
             network_knowledge,
             Some(section_key_share),
-            event_sender,
         )
         .await?;
 
@@ -109,10 +104,6 @@ impl Node {
         self.section_keys_provider
             .key_share(&section_key)
             .map_err(Error::from)
-    }
-
-    pub(crate) async fn send_event(&self, event: Event) {
-        self.event_sender.send(event).await
     }
 
     // ----------------------------------------------------------------------------------------

@@ -9,11 +9,8 @@
 use crate::node::{
     cfg::keypair_storage::{get_reward_pk, store_network_keypair, store_new_reward_keypair},
     flow_ctrl::{
-        dispatcher::Dispatcher,
-        event::{Elders, Event, MembershipEvent, NodeElderChange},
-        event_channel,
-        event_channel::EventReceiver,
-        CmdCtrl, FlowCtrl,
+        cmd_job::CmdProcessLog, dispatcher::Dispatcher, event_channel,
+        event_channel::EventReceiver, CmdCtrl, FlowCtrl,
     },
     join_network,
     logging::{log_ctx::LogCtx, run_system_logger},
@@ -24,12 +21,11 @@ use crate::{comm::Comm, data::Data};
 
 use sn_interface::{
     network_knowledge::{utils::read_prefix_map_from_disk, NodeInfo, MIN_ADULT_AGE},
-    types::{keys::ed25519, log_markers::LogMarker, PublicKey as TypesPublicKey},
+    types::{keys::ed25519, PublicKey as TypesPublicKey},
 };
 
 use rand_07::rngs::OsRng;
 use std::{
-    collections::BTreeSet,
     net::{Ipv4Addr, SocketAddr},
     path::Path,
     sync::Arc,
@@ -52,39 +48,59 @@ const GENESIS_DBC_FILENAME: &str = "genesis_dbc";
 
 static EVENT_CHANNEL_SIZE: usize = 20;
 
-/// Test only
-pub async fn new_test_api(
-    config: &Config,
-    join_timeout: Duration,
-) -> Result<(super::NodeTestApi, EventReceiver)> {
-    let (node, flow_ctrl, event_receiver) = new_node(config, join_timeout).await?;
-    Ok((super::NodeTestApi::new(node, flow_ctrl), event_receiver))
-}
-
 /// A reference held to the node to keep it running.
 ///
 /// Meant to be held while looping over the event receiver
 /// that transports events from the node.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct NodeRef {
-    node: Arc<RwLock<Node>>,
+pub struct NodeRunner {
     flow_ctrl: FlowCtrl,
+    event_receiver: EventReceiver<CmdProcessLog>,
+}
+
+impl NodeRunner {
+    /// Returns next log if any, else None.
+    pub fn try_next_log(&mut self) -> Option<CmdProcessLog> {
+        self.event_receiver.try_next()
+    }
+
+    /// Waits for, and then returns next log.
+    pub async fn await_next_log(&mut self) -> Option<CmdProcessLog> {
+        self.event_receiver.next().await
+    }
+
+    // /// Blocks until the node stops running.
+    // pub async fn start(&mut self) {
+    //     self.flow_ctrl.start().await
+    // }
+}
+
+/// Test only
+pub async fn new_test_api(
+    config: &Config,
+    join_timeout: Duration,
+) -> Result<(super::NodeTestApi, super::TestEventReceiver)> {
+    let (node, flow_ctrl, event_receiver) = new_node(config, join_timeout).await?;
+    Ok((
+        super::NodeTestApi::new(node, flow_ctrl),
+        super::TestEventReceiver::new(event_receiver),
+    ))
 }
 
 /// Start a new node.
-pub async fn start_node(
-    config: &Config,
-    join_timeout: Duration,
-) -> Result<(NodeRef, EventReceiver)> {
-    let (node, flow_ctrl, event_receiver) = new_node(config, join_timeout).await?;
-    Ok((NodeRef { node, flow_ctrl }, event_receiver))
+pub async fn start_node(config: &Config, join_timeout: Duration) -> Result<NodeRunner> {
+    let (_, flow_ctrl, event_receiver) = new_node(config, join_timeout).await?;
+    Ok(NodeRunner {
+        flow_ctrl,
+        event_receiver,
+    })
 }
 
 // Private helper to create a new node using the given config and bootstraps it to the network.
 async fn new_node(
     config: &Config,
     join_timeout: Duration,
-) -> Result<(Arc<RwLock<Node>>, FlowCtrl, EventReceiver)> {
+) -> Result<(Arc<RwLock<Node>>, FlowCtrl, EventReceiver<CmdProcessLog>)> {
     let root_dir_buf = config.root_dir()?;
     let root_dir = root_dir_buf.as_path();
     fs::create_dir_all(root_dir).await?;
@@ -139,8 +155,8 @@ async fn bootstrap_node(
     used_space: UsedSpace,
     root_storage_dir: &Path,
     join_timeout: Duration,
-) -> Result<(Arc<RwLock<Node>>, FlowCtrl, EventReceiver)> {
-    let (connection_event_tx, mut connection_event_rx) = mpsc::channel(1);
+) -> Result<(Arc<RwLock<Node>>, FlowCtrl, EventReceiver<CmdProcessLog>)> {
+    let (incoming_msg_pipe, mut incoming_conns) = mpsc::channel(1);
 
     let local_addr = config
         .local_addr
@@ -164,41 +180,21 @@ async fn bootstrap_node(
             local_addr,
             config.network_config().clone(),
             monitoring.clone(),
-            connection_event_tx,
+            incoming_msg_pipe,
         )
         .await?;
 
         // Generate the genesis key, this will be the first key in the sections chain,
         // as well as the owner of the genesis DBC minted by this first node of the network.
         let genesis_sk_set = bls::SecretKeySet::random(0, &mut rand::thread_rng());
-        let (node, genesis_dbc) = Node::first_node(
-            comm.socket_addr(),
-            Arc::new(keypair),
-            event_sender.clone(),
-            genesis_sk_set,
-        )
-        .await?;
+        let (node, genesis_dbc) =
+            Node::first_node(comm.socket_addr(), Arc::new(keypair), genesis_sk_set).await?;
 
         // Write the genesis DBC to disk
         let path = root_storage_dir.join(GENESIS_DBC_FILENAME);
         fs::write(path, genesis_dbc.to_hex().unwrap()).await?;
 
         let network_knowledge = node.network_knowledge();
-
-        let elders = Elders {
-            prefix: network_knowledge.prefix(),
-            key: network_knowledge.section_key(),
-            remaining: BTreeSet::new(),
-            added: network_knowledge.authority_provider().names(),
-            removed: BTreeSet::new(),
-        };
-
-        info!("{}", LogMarker::PromotedToElder);
-        node.send_event(Event::Membership(MembershipEvent::EldersChanged {
-            elders,
-            self_status_change: NodeElderChange::Promoted,
-        }))
-        .await;
 
         let genesis_key = network_knowledge.genesis_key();
         info!(
@@ -229,7 +225,7 @@ async fn bootstrap_node(
             bootstrap_nodes.as_slice(),
             config.network_config().clone(),
             monitoring.clone(),
-            connection_event_tx,
+            incoming_msg_pipe,
         )
         .await?;
         info!(
@@ -245,7 +241,7 @@ async fn bootstrap_node(
         let (info, network_knowledge) = join_network(
             joining_node,
             &comm,
-            &mut connection_event_rx,
+            &mut incoming_conns,
             bootstrap_addr,
             prefix_map,
             join_timeout,
@@ -257,7 +253,6 @@ async fn bootstrap_node(
             info.keypair.clone(),
             network_knowledge,
             None,
-            event_sender.clone(),
         )
         .await?;
 
@@ -274,7 +269,7 @@ async fn bootstrap_node(
         monitoring,
         event_sender,
     );
-    let flow_ctrl = FlowCtrl::new(cmd_ctrl, connection_event_rx);
+    let flow_ctrl = FlowCtrl::new(cmd_ctrl, incoming_conns);
 
     Ok((node, flow_ctrl, event_receiver))
 }
