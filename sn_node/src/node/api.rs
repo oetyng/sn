@@ -6,12 +6,9 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::{
-    node::{
-        flow_ctrl::{cmds::Cmd, event_channel::EventSender},
-        Error, Event, Node, Result, GENESIS_DBC_AMOUNT,
-    },
-    UsedSpace,
+use crate::node::{
+    flow_ctrl::{cmds::Cmd, event_channel::EventSender},
+    Error, Event, Node, Result, GENESIS_DBC_AMOUNT,
 };
 
 use sn_interface::{
@@ -26,7 +23,7 @@ use sn_dbc::{
     rng, Dbc, Hash, IndexedSignatureShare, MlsagMaterial, Owner, OwnerOnce, RevealedCommitment,
     SpentProofContent, SpentProofShare, TransactionBuilder, TrueInput,
 };
-use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 use xor_name::XorName;
 
 impl Node {
@@ -34,8 +31,6 @@ impl Node {
         our_addr: SocketAddr,
         keypair: Arc<Keypair>,
         event_sender: EventSender,
-        used_space: UsedSpace,
-        root_storage_dir: PathBuf,
         genesis_sk_set: bls::SecretKeySet,
     ) -> Result<(Self, Dbc)> {
         let info = NodeInfo {
@@ -55,8 +50,6 @@ impl Node {
             network_knowledge,
             Some(section_key_share),
             event_sender,
-            used_space,
-            root_storage_dir,
         )
         .await?;
 
@@ -76,6 +69,10 @@ impl Node {
         Ok(())
     }
 
+    pub(crate) fn name(&self) -> XorName {
+        self.info().name()
+    }
+
     pub(crate) fn network_knowledge(&self) -> &NetworkKnowledge {
         &self.network_knowledge
     }
@@ -86,7 +83,7 @@ impl Node {
 
     /// Is this node an elder?
     pub(crate) fn is_elder(&self) -> bool {
-        self.network_knowledge.is_elder(&self.info().name())
+        self.network_knowledge.is_elder(&self.name())
     }
 
     pub(crate) fn is_not_elder(&self) -> bool {

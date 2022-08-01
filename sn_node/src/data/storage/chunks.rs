@@ -25,18 +25,20 @@ const CHUNKS_DB_NAME: &str = "chunks";
 
 /// Operations on data chunks.
 #[derive(Clone, Debug)]
-pub(crate) struct ChunkStorage {
+pub struct ChunkStorage {
     db: FileStore,
 }
 
 impl ChunkStorage {
-    pub(crate) fn new(path: &Path, used_space: UsedSpace) -> Result<Self> {
+    /// Instantiate a new file backed chunk store.
+    pub fn new(path: &Path, used_space: UsedSpace) -> Result<Self> {
         Ok(Self {
             db: FileStore::new(path.join(CHUNKS_DB_NAME), used_space)?,
         })
     }
 
-    pub(crate) fn keys(&self) -> Vec<DataAddress> {
+    /// Get all DataAddresses of stored data
+    pub fn keys(&self) -> Vec<DataAddress> {
         self.db.list_all_data_addresses()
     }
 
@@ -46,10 +48,11 @@ impl ChunkStorage {
         self.db.delete_data(&DataAddress::Chunk(*address)).await
     }
 
-    pub(crate) async fn get_chunk(&self, address: &ChunkAddress) -> Result<Chunk> {
+    /// Read chunk from local store
+    pub async fn get_chunk(&self, address: ChunkAddress) -> Result<Chunk> {
         debug!("Getting chunk {:?}", address);
 
-        match self.db.read_data(&DataAddress::Chunk(*address)).await {
+        match self.db.read_data(&DataAddress::Chunk(address)).await {
             Ok(res) => Ok(res),
             Err(error) => match error {
                 Error::Io(io_error) if io_error.kind() == ErrorKind::NotFound => {
@@ -60,8 +63,8 @@ impl ChunkStorage {
         }
     }
 
-    // Read chunk from local store and return NodeQueryResponse
-    pub(crate) async fn get(&self, address: &ChunkAddress) -> NodeQueryResponse {
+    /// Read chunk from local store and return NodeQueryResponse
+    pub async fn get(&self, address: ChunkAddress) -> NodeQueryResponse {
         trace!("{:?}", LogMarker::ChunkQueryReceviedAtAdult);
         NodeQueryResponse::GetChunk(self.get_chunk(address).await.map_err(convert_to_error_msg))
     }
@@ -69,7 +72,7 @@ impl ChunkStorage {
     /// Store a chunk in the local disk store
     /// If that chunk was already in the local store, just overwrites it
     #[instrument(skip_all)]
-    pub(super) async fn store(&self, data: DataCmd) -> Result<()> {
+    pub async fn store(&self, data: DataCmd) -> Result<()> {
         if self.db.data_file_exists(&data.address())? {
             info!(
                 "{}: Data already exists, not storing: {:?}",

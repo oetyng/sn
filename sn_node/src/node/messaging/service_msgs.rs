@@ -20,8 +20,8 @@ use sn_interface::{
     data_copy_count,
     messaging::{
         data::{
-            CmdError, DataCmd, DataQueryVariant, EditRegister, Error as ErrorMsg, ServiceMsg,
-            SignedRegisterEdit, SpentbookCmd,
+            CmdError, DataCmd, EditRegister, Error as ErrorMsg, ServiceMsg, SignedRegisterEdit,
+            SpentbookCmd,
         },
         system::{NodeQueryResponse, SystemMsg},
         AuthorityProof, EndUser, MsgId, ServiceAuth,
@@ -95,31 +95,24 @@ impl Node {
         }
     }
 
-    /// Handle data query
-    pub(crate) async fn handle_data_query_at_adult(
+    /// Send query response back to the relaying elder.
+    pub(crate) async fn send_query_reponse(
         &self,
+        response: NodeQueryResponse,
+        relaying_elder: Peer,
         correlation_id: MsgId,
-        query: &DataQueryVariant,
-        auth: ServiceAuth,
         user: EndUser,
-        requesting_elder: Peer,
         #[cfg(feature = "traceroute")] traceroute: Vec<Entity>,
     ) -> Cmd {
-        let response = self
-            .data_storage
-            .query(query, User::Key(auth.public_key))
-            .await;
-
-        trace!("data query response at adult is: {:?}", response);
+        // trace!("data query response at adult is: {:?}", response);
         let msg = SystemMsg::NodeQueryResponse {
             response,
             correlation_id,
             user,
         };
-
         self.trace_system_msg(
             msg,
-            Peers::Single(requesting_elder),
+            Peers::Single(relaying_elder),
             #[cfg(feature = "traceroute")]
             traceroute,
         )
@@ -128,7 +121,7 @@ impl Node {
     /// Handle data read
     /// Records response in liveness tracking
     /// Forms a response to send to the requester
-    pub(crate) async fn handle_data_query_response_at_elder(
+    pub(crate) async fn handle_query_response_at_elder(
         &mut self,
         correlation_id: MsgId,
         response: NodeQueryResponse,

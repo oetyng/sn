@@ -66,7 +66,7 @@ impl DataCmd {
             #[cfg(feature = "chunks")]
             StoreChunk(c) => *c.name(),
             #[cfg(feature = "registers")]
-            Register(c) => c.name(), // TODO: c.dst_id(), as to not co-locate private and public and different tags of same name.
+            Register(c) => c.name(),
             #[cfg(feature = "spentbook")]
             Spentbook(c) => c.name(),
         }

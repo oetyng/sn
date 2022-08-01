@@ -7,7 +7,7 @@ use sn_client::{Client, Error};
 use sn_interface::{
     data_copy_count,
     messaging::{
-        data::{DataQuery, DataQueryVariant, QueryResponse, ServiceMsg},
+        data::{DataQuery, QueryResponse, ServiceMsg, TargetedDataQuery},
         WireMsg,
     },
     types::{Chunk, ChunkAddress},
@@ -120,11 +120,11 @@ async fn query_chunk(client: &Client, adult: usize, address: XorName) -> Result<
 async fn send_query(
     client: &Client,
     address: XorName,
-    adult_index: usize,
+    target_adult_index: usize,
 ) -> Result<QueryResponse> {
-    let query = DataQuery {
-        adult_index,
-        variant: DataQueryVariant::GetChunk(ChunkAddress(address)),
+    let query = TargetedDataQuery {
+        target_adult_index,
+        query: DataQuery::GetChunk(ChunkAddress(address)),
     };
 
     let client_pk = client.public_key();

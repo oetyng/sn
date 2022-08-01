@@ -7,14 +7,17 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::comm::Comm;
+use crate::data::Data;
 use crate::node::{
     messaging::{OutgoingMsg, Peers},
-    Cmd, Error, Node, Result,
+    Cmd, Error, MembershipEvent, Node, Result,
 };
 
-use sn_interface::messaging::{AuthKind, Dst, MsgId};
 use sn_interface::{
-    messaging::{system::SystemMsg, WireMsg},
+    messaging::{
+        system::{NodeCmd, NodeEvent, SystemMsg},
+        AuthKind, Dst, MsgId, WireMsg,
+    },
     types::Peer,
 };
 
@@ -29,11 +32,12 @@ use tokio::{sync::watch, sync::RwLock, time};
 pub(crate) struct Dispatcher {
     node: Arc<RwLock<Node>>,
     comm: Comm,
+    data: Data,
     dkg_timeout: Arc<DkgTimeout>,
 }
 
 impl Dispatcher {
-    pub(crate) fn new(node: Arc<RwLock<Node>>, comm: Comm) -> Self {
+    pub(crate) fn new(node: Arc<RwLock<Node>>, comm: Comm, data: Data) -> Self {
         let (cancel_timer_tx, cancel_timer_rx) = watch::channel(false);
         let dkg_timeout = Arc::new(DkgTimeout {
             cancel_timer_tx,
@@ -44,6 +48,7 @@ impl Dispatcher {
             node,
             dkg_timeout,
             comm,
+            data,
         }
     }
 
@@ -60,6 +65,13 @@ impl Dispatcher {
     /// Handles a single cmd.
     pub(crate) async fn process_cmd(&self, cmd: Cmd) -> Result<Vec<Cmd>> {
         match cmd {
+            Cmd::HandleEvents(events) => {
+                let mut cmds = vec![];
+                for event in events {
+                    cmds.extend(self.process_event(event).await.into_iter());
+                }
+                Ok(cmds)
+            }
             Cmd::CleanupPeerLinks => {
                 let members = { self.node.read().await.network_knowledge.section_members() };
                 self.comm.cleanup_peers(members).await;
@@ -212,32 +224,9 @@ impl Dispatcher {
                 let mut node = self.node.write().await;
                 node.handle_dkg_outcome(section_auth, outcome).await
             }
-            Cmd::HandleDkgFailure(signeds) => {
+            Cmd::HandleDkgFailure(failure) => {
                 let mut node = self.node.write().await;
-                Ok(vec![node.handle_dkg_failure(signeds)])
-            }
-            Cmd::EnqueueDataForReplication {
-                // throttle_duration,
-                recipient,
-                data_batch,
-            } => {
-                // we should queue this
-                for data in data_batch {
-                    trace!("data being enqueued for replication {:?}", data);
-                    let mut node = self.node.write().await;
-                    if let Some(peers_set) = node.pending_data_to_replicate_to_peers.get_mut(&data)
-                    {
-                        debug!("data already queued, adding peer");
-                        let _existed = peers_set.insert(recipient);
-                    } else {
-                        let mut peers_set = BTreeSet::new();
-                        let _existed = peers_set.insert(recipient);
-                        let _existed = node
-                            .pending_data_to_replicate_to_peers
-                            .insert(data, peers_set);
-                    };
-                }
-                Ok(vec![])
+                Ok(vec![node.handle_dkg_failure(failure)])
             }
             Cmd::ScheduleDkgTimeout { duration, token } => Ok(self
                 .handle_scheduled_dkg_timeout(duration, token)
@@ -270,10 +259,100 @@ impl Dispatcher {
                 }
                 Ok(vec![])
             }
-            Cmd::Comm(comm_cmd) => {
-                self.comm.handle_cmd(comm_cmd).await;
+            Cmd::Comm(cmd) => {
+                self.comm.handle(cmd).await;
                 Ok(vec![])
             }
+            Cmd::Data(cmd) => {
+                let _event = self.data.handle(cmd);
+                Ok(vec![])
+            }
+        }
+    }
+
+    async fn process_event(&self, event: crate::node::Event) -> Option<Cmd> {
+        use crate::data::Event as DataEvent;
+        match event {
+            crate::node::Event::Messaging(_) | crate::node::Event::CmdProcessing(_) => None,
+            crate::node::Event::Membership(e) => match e {
+                MembershipEvent::AdultsChanged { .. } => {
+                    // Only trigger data completion request when there is an adult change.
+                    let currently_held_data = self.data.keys();
+                    let node = self.node.read().await;
+                    Some(node.ask_peers_for_data(currently_held_data))
+                }
+                _ => None,
+            },
+            crate::node::Event::Data(e) => match e {
+                DataEvent::QueryResponseProduced {
+                    response,
+                    relaying_elder,
+                    correlation_id,
+                    user,
+                    #[cfg(feature = "traceroute")]
+                    traceroute,
+                } => {
+                    let node = self.node.read().await;
+                    let cmd = node
+                        .send_query_reponse(
+                            response,
+                            relaying_elder,
+                            correlation_id,
+                            user,
+                            #[cfg(feature = "traceroute")]
+                            traceroute,
+                        )
+                        .await;
+                    Some(cmd)
+                }
+                DataEvent::StorageFailed { error, data, .. } => {
+                    if let Some(data) = data {
+                        // error!("Not enough space to store more data");
+                        let node = self.node.read().await;
+                        let node_id = node.info().id();
+                        let msg = SystemMsg::NodeEvent(NodeEvent::CouldNotStoreData {
+                            node_id,
+                            data,
+                            full: true,
+                        });
+                        Some(node.send_msg_to_our_elders(msg))
+                    } else {
+                        // these seem to be non-problematic errors and are ignored
+                        error!("Problem storing data, but it was ignored: {error}");
+                        None
+                    }
+                }
+                DataEvent::ReplicationQueuePopped { data, recipients } => {
+                    let msg = SystemMsg::NodeCmd(NodeCmd::ReplicateData(vec![data]));
+                    Some(Cmd::send_msg(
+                        OutgoingMsg::System(msg),
+                        Peers::Multiple(recipients),
+                    ))
+                }
+                DataEvent::StorageLevelIncreased(level) => {
+                    // info!("Storage has now passed {} % used.", 10 * level.value());
+                    let (node_id, node_name, elders) = {
+                        let node = self.node.read().await;
+                        let elders = node.network_knowledge.elders();
+                        let info = node.info();
+                        let id = info.id();
+                        let name = info.name();
+                        (id, name, elders)
+                    };
+
+                    // we ask the section to record the new level reached
+                    let msg = SystemMsg::NodeCmd(NodeCmd::RecordStorageLevel {
+                        section: node_name,
+                        node_id,
+                        level,
+                    });
+
+                    Some(Cmd::send_msg(
+                        OutgoingMsg::System(msg),
+                        Peers::Multiple(elders),
+                    ))
+                }
+            },
         }
     }
 

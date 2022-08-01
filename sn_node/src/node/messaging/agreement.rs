@@ -142,7 +142,7 @@ impl Node {
 
         info!("New SAP agreed for:{}", *signed_section_auth);
 
-        let our_name = self.info().name();
+        let our_name = self.name();
 
         // Let's update our network knowledge, including our
         // section SAP and chain if the new SAP's prefix matches our name
@@ -184,6 +184,6 @@ impl Node {
             self.network_knowledge.prefix_map()
         );
 
-        self.update_on_elder_change(snapshot).await
+        self.update_on_member_change(snapshot).await
     }
 }

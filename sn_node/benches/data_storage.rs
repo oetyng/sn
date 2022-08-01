@@ -7,14 +7,15 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use sn_interface::{
-    messaging::data::{CreateRegister, SignedRegisterCreate},
+    messaging::data::{CreateRegister, DataCmd, SignedRegisterCreate},
     types::{
         register::{Policy, User},
-        Chunk, Keypair, PublicKey, RegisterCmd, ReplicatedData,
+        Chunk, Keypair, RegisterCmd,
     },
 };
 use sn_node::{
-    node::{cfg::config_handler::Config, DataStorage},
+    data::{ChunkStorage, RegisterStorage},
+    node::cfg::config_handler::Config,
     UsedSpace,
 };
 
@@ -23,7 +24,10 @@ use criterion::{BenchmarkId, Criterion};
 use eyre::{Result, WrapErr};
 use rand::{distributions::Alphanumeric, rngs::OsRng, thread_rng, Rng};
 use rayon::current_num_threads;
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 use tempfile::tempdir;
 use tokio::runtime::Runtime;
 
@@ -86,9 +90,6 @@ fn main() -> Result<()> {
 }
 
 fn bench_data_storage_writes(c: &mut Criterion) -> Result<()> {
-    let pk = PublicKey::Bls(bls::SecretKey::random().public_key());
-    let keypair = Keypair::new_ed25519();
-
     let mut group = c.benchmark_group("write-sampling");
 
     let runtime = Runtime::new().unwrap();
@@ -97,22 +98,17 @@ fn bench_data_storage_writes(c: &mut Criterion) -> Result<()> {
     let size_ranges = [100, 1_000, 4_000];
 
     for size in size_ranges.iter() {
-        let data_set: Vec<_> = (0..*size)
-            .map(|_| create_random_register_replicated_data())
-            .collect();
+        let data_set: Vec<_> = (0..*size).map(|_| create_random_register_cmd()).collect();
         group.bench_with_input(
             BenchmarkId::new("register_writes", size),
             &(size, &data_set),
             |b, (size, data_set)| {
-                let storage = get_new_data_store()
+                let storage = get_new_register_store()
                     .context("Could not create a temp data store")
                     .unwrap();
                 b.to_async(&runtime).iter(|| async {
                     for i in 0..**size {
-                        let _ = storage
-                            .clone()
-                            .store(&data_set[i], pk, keypair.clone())
-                            .await;
+                        let _ = storage.clone().write(data_set[i].clone()).await;
                     }
                 })
             },
@@ -125,16 +121,15 @@ fn bench_data_storage_writes(c: &mut Criterion) -> Result<()> {
             BenchmarkId::new("chunk writes", size),
             &(size, &seed),
             |b, (size, seed)| {
-                let storage = get_new_data_store()
+                let storage = get_new_chunk_store()
                     .context("Could not create a temp data store")
                     .unwrap();
                 b.to_async(&runtime).iter(|| async {
                     for _ in 0..**size {
-                        let random_data =
-                            ReplicatedData::Chunk(Chunk::new(grows_vec_to_bytes(seed)));
+                        let random_data = DataCmd::StoreChunk(Chunk::new(grows_vec_to_bytes(seed)));
                         storage
                             .clone()
-                            .store(&random_data, pk, keypair.clone())
+                            .store(random_data.clone())
                             .await
                             .expect("failed to write chunk {i}");
                     }
@@ -147,9 +142,6 @@ fn bench_data_storage_writes(c: &mut Criterion) -> Result<()> {
 }
 
 fn bench_data_storage_reads(c: &mut Criterion) -> Result<()> {
-    let pk = PublicKey::Bls(bls::SecretKey::random().public_key());
-    let keypair = Keypair::new_ed25519();
-
     let mut group = c.benchmark_group("read-sampling");
 
     let runtime = Runtime::new().unwrap();
@@ -159,15 +151,15 @@ fn bench_data_storage_reads(c: &mut Criterion) -> Result<()> {
 
     for size in size_ranges.iter() {
         group.bench_with_input(BenchmarkId::new("register_keys", size), size, |b, &size| {
-            let storage = get_new_data_store()
+            let storage = get_new_register_store()
                 .context("Could not create a temp data store")
                 .unwrap();
 
             for _ in 0..size {
-                let random_data = create_random_register_replicated_data();
+                let random_data = create_random_register_cmd();
 
                 if runtime
-                    .block_on(storage.clone().store(&random_data, pk, keypair.clone()))
+                    .block_on(storage.write(random_data))
                     .context("could not store register")
                     .is_err()
                 {
@@ -175,23 +167,23 @@ fn bench_data_storage_reads(c: &mut Criterion) -> Result<()> {
                 }
             }
 
-            b.iter(|| {
-                let _keys = storage.keys();
+            b.iter(|| async {
+                let _ = storage.keys();
             })
         });
     }
 
     for size in size_ranges.iter() {
         group.bench_with_input(BenchmarkId::new("chunk keys", size), size, |b, &size| {
-            let mut storage = get_new_data_store()
+            let storage = get_new_chunk_store()
                 .context("Could not create a temp data store")
                 .unwrap();
 
             for _ in 0..size {
                 let file = sn_interface::types::utils::random_bytes(NONSENSE_CHUNK_SIZE);
-                let random_data = ReplicatedData::Chunk(Chunk::new(file));
+                let random_data = DataCmd::StoreChunk(Chunk::new(file));
                 if runtime
-                    .block_on(storage.store(&random_data, pk, keypair.clone()))
+                    .block_on(storage.store(random_data))
                     .context("could not store chunk")
                     .is_err()
                 {
@@ -199,8 +191,8 @@ fn bench_data_storage_reads(c: &mut Criterion) -> Result<()> {
                 };
             }
 
-            b.iter(|| {
-                let _keys = storage.keys();
+            b.iter(|| async {
+                let _ = storage.keys();
             })
         });
     }
@@ -234,7 +226,7 @@ fn public_policy(owner: User) -> Policy {
     Policy { owner, permissions }
 }
 
-pub fn create_random_register_replicated_data() -> ReplicatedData {
+pub fn create_random_register_cmd() -> RegisterCmd {
     let keypair = Keypair::new_ed25519();
 
     let name = xor_name::rand::random();
@@ -249,7 +241,7 @@ pub fn create_random_register_replicated_data() -> ReplicatedData {
         policy,
     };
     let signature = keypair.sign(&bincode::serialize(&op).expect("could not serialize op"));
-    let reg_cmd = RegisterCmd::Create {
+    RegisterCmd::Create {
         cmd: SignedRegisterCreate {
             op,
             auth: sn_interface::messaging::ServiceAuth {
@@ -258,25 +250,31 @@ pub fn create_random_register_replicated_data() -> ReplicatedData {
             },
         },
         section_auth: section_auth(), // obtained after presenting a valid payment to the network
-    };
-
-    ReplicatedData::RegisterWrite(reg_cmd)
+    }
 }
 
-fn get_new_data_store() -> Result<DataStorage> {
+fn get_new_chunk_store() -> Result<ChunkStorage> {
+    let (storage_dir, used_space) = gen_info()?;
+    Ok(ChunkStorage::new(&storage_dir, used_space)?)
+}
+
+fn get_new_register_store() -> Result<RegisterStorage> {
+    let (storage_dir, used_space) = gen_info()?;
+    Ok(RegisterStorage::new(&storage_dir, used_space)?)
+}
+
+fn gen_info() -> Result<(PathBuf, UsedSpace)> {
     let random_filename: String = thread_rng()
         .sample_iter(&Alphanumeric)
         .take(7)
         .map(char::from)
         .collect();
-
     let root_dir = tempdir().map_err(|e| eyre::eyre!(e.to_string()))?;
     let storage_dir = Path::new(root_dir.path()).join(random_filename);
+
     let config = Config::default();
     let max_capacity = config.max_capacity();
-
     let used_space = UsedSpace::new(max_capacity);
-    let store = DataStorage::new(&storage_dir, used_space)?;
 
-    Ok(store)
+    Ok((storage_dir, used_space))
 }

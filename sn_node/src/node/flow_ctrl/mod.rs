@@ -17,12 +17,11 @@ pub(crate) mod tests;
 pub(crate) use self::cmd_ctrl::CmdCtrl;
 
 use crate::comm::MsgEvent;
-use crate::node::{flow_ctrl::cmds::Cmd, messaging::Peers, Error, Node, Result};
+use crate::node::{flow_ctrl::cmds::Cmd, Error, Node, Result};
 
 use sn_interface::{
     messaging::{
-        data::{DataQuery, DataQueryVariant, ServiceMsg},
-        system::{NodeCmd, SystemMsg},
+        data::{DataQuery, ServiceMsg, TargetedDataQuery},
         AuthorityProof, MsgId, ServiceAuth, WireMsg,
     },
     types::{log_markers::LogMarker, ChunkAddress, PublicKey, Signature},
@@ -139,9 +138,9 @@ impl FlowCtrl {
 
                 let chunk_addr = our_prefix.substituted_in(chunk_addr);
 
-                let msg = ServiceMsg::Query(DataQuery {
-                    variant: DataQueryVariant::GetChunk(ChunkAddress(chunk_addr)),
-                    adult_index: 0,
+                let msg = ServiceMsg::Query(TargetedDataQuery {
+                    query: DataQuery::GetChunk(ChunkAddress(chunk_addr)),
+                    target_adult_index: 0,
                 });
 
                 let msg_id = MsgId::new();
@@ -271,69 +270,15 @@ impl FlowCtrl {
         let _handle: JoinHandle<Result<()>> = tokio::task::spawn_local(async move {
             let mut interval = tokio::time::interval(DATA_BATCH_INTERVAL);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            use rand::seq::IteratorRandom;
-            let mut rng = rand::rngs::OsRng;
-
             loop {
                 let _ = interval.tick().await;
 
-                let mut this_batch_address = None;
-
-                let data_queued = {
-                    let node = self.node.read().await;
-                    // choose a data to replicate at random
-                    let data_queued = node
-                        .pending_data_to_replicate_to_peers
-                        .iter()
-                        .choose(&mut rng)
-                        .map(|(address, _)| *address);
-                    data_queued
-                };
-
-                if let Some(data_addr) = data_queued {
-                    this_batch_address = Some(data_addr);
-                }
-
-                if let Some(address) = this_batch_address {
-                    trace!("Data found in queue to send out");
-
-                    let target_peer = {
-                        // careful now, if we're holding any ref into the read above we'll lock here.
-                        let mut node = self.node.write().await;
-                        node.pending_data_to_replicate_to_peers.remove(&address)
-                    };
-
-                    if let Some(data_recipients) = target_peer {
-                        debug!("Data queued to be replicated");
-
-                        if data_recipients.is_empty() {
-                            continue;
-                        }
-
-                        let data_to_send = self
-                            .node
-                            .read()
-                            .await
-                            .data_storage
-                            .get_from_local_store(&address)
-                            .await?;
-
-                        debug!(
-                            "{:?} Data {:?} to: {:?}",
-                            LogMarker::SendingMissingReplicatedData,
-                            address,
-                            data_recipients,
-                        );
-
-                        let msg = SystemMsg::NodeCmd(NodeCmd::ReplicateData(vec![data_to_send]));
-                        let node = self.node.read().await;
-                        let cmd = node.send_system_msg(msg, Peers::Multiple(data_recipients));
-
-                        if let Err(e) = self.cmd_ctrl.push(cmd).await {
-                            error!("Error in data replication loop: {:?}", e);
-                        }
-                    }
+                if let Err(e) = self
+                    .cmd_ctrl
+                    .push(Cmd::Data(crate::data::Cmd::PopReplicationQueue))
+                    .await
+                {
+                    error!("Error sending recurring PopReplicationQueue cmd: {e}.");
                 }
             }
         });
@@ -410,6 +355,9 @@ impl FlowCtrl {
     fn start_backpressure_reporting(self) {
         info!("Firing off backpressure reports");
         let _handle = tokio::task::spawn_local(async move {
+            use crate::node::messaging::Peers;
+            use sn_interface::messaging::system::SystemMsg;
+
             let mut interval = tokio::time::interval(BACKPRESSURE_INTERVAL);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let _ = interval.tick().await;
@@ -460,7 +408,7 @@ async fn handle_connection_events(ctrl: FlowCtrl, mut incoming_conns: mpsc::Rece
 
                 let span = {
                     let node = &ctrl.node;
-                    let name = node.read().await.info().name();
+                    let name = node.read().await.name();
                     trace_span!("handle_message", name = %name, ?sender, msg_id = ?wire_msg.msg_id())
                 };
                 let _span_guard = span.enter();

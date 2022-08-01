@@ -28,10 +28,10 @@ use xor_name::{Prefix, XorName};
 /// but primarily the aim is now to make use of it for a more structured logging
 /// and as a read-node_api to a UI.
 #[allow(clippy::large_enum_variant)]
-#[derive(custom_debug::Debug)]
+#[derive(custom_debug::Debug, Clone)]
 pub enum Event {
     ///
-    Data(DataEvent),
+    Data(crate::data::Event),
     ///
     Messaging(MessagingEvent),
     ///
@@ -40,17 +40,11 @@ pub enum Event {
     CmdProcessing(CmdProcessEvent),
 }
 
-/// Informing on data related changes.
-///
-/// Currently not used.
-#[derive(Debug)]
-pub enum DataEvent {}
-
 /// Informing on incoming msgs.
 ///
 /// Currently only used in tests.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MessagingEvent {
     /// Received a msg from another Node.
     SystemMsgReceived {
@@ -81,7 +75,7 @@ pub enum MessagingEvent {
 }
 
 /// Informing on the processing of an individual cmd.
-#[derive(custom_debug::Debug)]
+#[derive(custom_debug::Debug, Clone)]
 pub enum CmdProcessEvent {
     ///
     Started {
@@ -122,7 +116,7 @@ pub enum CmdProcessEvent {
 /// Informing on membership related changes.¨
 ///
 /// Still mostly used in tests.
-#[derive(custom_debug::Debug)]
+#[derive(custom_debug::Debug, Clone)]
 pub enum MembershipEvent {
     /// Join occured during section churn and new elders missed it,
     /// therefore the node is not a section member anymore, it needs to rejoin the network.

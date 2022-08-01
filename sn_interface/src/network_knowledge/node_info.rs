@@ -45,8 +45,12 @@ impl NodeInfo {
         Peer::new(self.name(), self.addr)
     }
 
+    pub fn id(&self) -> PublicKey {
+        PublicKey::from(self.keypair.public)
+    }
+
     pub fn name(&self) -> XorName {
-        XorName::from(PublicKey::from(self.keypair.public))
+        XorName::from(self.id())
     }
 
     // Last byte of the name represents the age.

@@ -68,7 +68,7 @@ impl Node {
         let msg_id = MsgId::new();
 
         let mut cmds = vec![];
-        let our_name = self.info().name();
+        let our_name = self.name();
         // handle ourselves if we should
         for peer in recipients.clone() {
             if peer.name() == our_name {

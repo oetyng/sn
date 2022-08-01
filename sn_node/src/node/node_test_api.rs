@@ -52,7 +52,7 @@ impl NodeTestApi {
 
     /// The name of this node.
     pub async fn name(&self) -> XorName {
-        self.node.read().await.info().name()
+        self.node.read().await.name()
     }
 
     /// Returns connection info of this node.

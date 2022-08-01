@@ -9,15 +9,15 @@
 mod chunks;
 mod registers;
 
-pub(crate) use chunks::ChunkStorage;
-pub(crate) use registers::RegisterStorage;
+pub use chunks::ChunkStorage;
+pub use registers::RegisterStorage;
 
 use crate::{dbs::Result, UsedSpace};
 
 use sn_dbc::SpentProofShare;
 use sn_interface::{
     messaging::{
-        data::{DataQueryVariant, Error, RegisterQuery, RegisterStoreExport, StorageLevel},
+        data::{DataQuery, Error, RegisterQuery, RegisterStoreExport, StorageLevel},
         system::NodeQueryResponse,
     },
     types::{
@@ -27,16 +27,19 @@ use sn_interface::{
 };
 
 use sn_interface::messaging::data::DataCmd;
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 /// Operations on data.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 // exposed as pub due to benches
 pub struct DataStorage {
     chunks: ChunkStorage,
     registers: RegisterStorage,
     used_space: UsedSpace,
-    last_recorded_level: StorageLevel,
+    storage_level: AtomicU8,
 }
 
 impl DataStorage {
@@ -46,15 +49,15 @@ impl DataStorage {
             chunks: ChunkStorage::new(path, used_space.clone())?,
             registers: RegisterStorage::new(path, used_space.clone())?,
             used_space,
-            last_recorded_level: StorageLevel::zero(),
+            storage_level: AtomicU8::new(0),
         })
     }
 
     /// Store data in the local store
     #[instrument(skip(self))]
     pub async fn store(
-        &mut self,
-        data: &ReplicatedData,
+        &self,
+        data: ReplicatedData,
         pk_for_spent_book: PublicKey,
         keypair_for_spent_book: Keypair,
     ) -> Result<Option<StorageLevel>> {
@@ -89,18 +92,26 @@ impl DataStorage {
             }
         };
 
+        let storage_level = StorageLevel::from(self.storage_level.load(Ordering::Relaxed))?;
+
         // check if we've filled another approx. 10%-points of our storage
         // if so, update the recorded level
-        let last_recorded_level = self.last_recorded_level;
-        if let Ok(next_level) = last_recorded_level.next() {
+        if let Ok(next_level) = storage_level.next() {
             // used_space_ratio is a heavy task that's why we don't do it all the time
             let used_space_ratio = self.used_space.ratio();
             let used_space_level = 10.0 * used_space_ratio;
             // every level represents 10 percentage points
             if used_space_level as u8 >= next_level.value() {
                 debug!("Next level for storage has been reached");
-                self.last_recorded_level = next_level;
-                return Ok(Some(next_level));
+                match self.storage_level.compare_exchange(
+                    storage_level.value(),
+                    next_level.value(),
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                ) {
+                    Result::<u8, u8>::Ok(_) => return Ok(Some(next_level)),
+                    Result::<u8, u8>::Err(_) => return Ok(None),
+                }
             }
         }
 
@@ -108,15 +119,11 @@ impl DataStorage {
     }
 
     // Query the local store and return NodeQueryResponse
-    pub(crate) async fn query(
-        &self,
-        query: &DataQueryVariant,
-        requester: User,
-    ) -> NodeQueryResponse {
+    pub(crate) async fn query(&self, query: DataQuery, requester: User) -> NodeQueryResponse {
         match query {
-            DataQueryVariant::GetChunk(addr) => self.chunks.get(addr).await,
-            DataQueryVariant::Register(read) => self.registers.read(read, requester).await,
-            DataQueryVariant::Spentbook(read) => {
+            DataQuery::GetChunk(addr) => self.chunks.get(addr).await,
+            DataQuery::Register(read) => self.registers.read(read, requester).await,
+            DataQuery::Spentbook(read) => {
                 // TODO: this is temporary till spentbook native data type is implemented,
                 // we read from the Register where we store the spentbook data
                 let spentbook_op_id = match read.operation_id() {
@@ -130,7 +137,7 @@ impl DataStorage {
 
                 match self
                     .registers
-                    .read(&RegisterQuery::Get(reg_addr), requester)
+                    .read(RegisterQuery::Get(reg_addr), requester)
                     .await
                 {
                     NodeQueryResponse::GetRegister((Err(Error::DataNotFound(_)), _)) => {
@@ -172,7 +179,7 @@ impl DataStorage {
     // Read data from local store
     pub(crate) async fn get_from_local_store(
         &self,
-        address: &ReplicatedDataAddress,
+        address: ReplicatedDataAddress,
     ) -> Result<ReplicatedData> {
         match address {
             ReplicatedDataAddress::Chunk(addr) => {
@@ -186,7 +193,7 @@ impl DataStorage {
             ReplicatedDataAddress::Spentbook(addr) => {
                 let reg_addr = RegisterAddress::new(*addr.name(), SPENTBOOK_TYPE_TAG);
                 self.registers
-                    .get_register_replica(&reg_addr)
+                    .get_register_replica(reg_addr)
                     .await
                     .map(ReplicatedData::SpentbookLog)
             }
@@ -226,12 +233,12 @@ impl DataStorage {
 
 #[cfg(test)]
 mod tests {
+    use crate::data::DataStorage;
     use crate::dbs::Error;
-    use crate::node::data::DataStorage;
     use crate::UsedSpace;
 
     use sn_interface::{
-        messaging::{data::DataQueryVariant, system::NodeQueryResponse},
+        messaging::{data::DataQuery, system::NodeQueryResponse},
         types::{
             register::User, utils::random_bytes, Chunk, ChunkAddress, Keypair, PublicKey,
             ReplicatedData, ReplicatedDataAddress,
@@ -273,20 +280,20 @@ mod tests {
         let keypair = Keypair::new_ed25519();
 
         // Store the chunk
-        let _ = storage.store(&replicated_data, pk, keypair).await?;
+        let _ = storage.store(replicated_data.clone(), pk, keypair).await?;
 
         // Test local fetch
         let fetched_data = storage
-            .get_from_local_store(&replicated_data.address())
+            .get_from_local_store(replicated_data.address())
             .await?;
 
         assert_eq!(replicated_data, fetched_data);
 
         // Test client fetch
-        let query = DataQueryVariant::GetChunk(*chunk.address());
+        let query = DataQuery::GetChunk(*chunk.address());
         let user = User::Anyone;
 
-        let query_response = storage.query(&query, user).await;
+        let query_response = storage.query(query, user).await;
 
         assert_eq!(query_response, NodeQueryResponse::GetChunk(Ok(chunk)));
 
@@ -295,7 +302,7 @@ mod tests {
 
         // Assert data is not found after storage
         match storage
-            .get_from_local_store(&replicated_data.address())
+            .get_from_local_store(replicated_data.address())
             .await
         {
             Err(Error::ChunkNotFound(address)) => assert_eq!(address, replicated_data.name()),
@@ -373,8 +380,11 @@ mod tests {
                             ReplicatedData::Chunk(chunk)
                         }
                     };
-                    let _ =
-                        runtime.block_on(storage.store(&data, owner_pk, owner_keypair.clone()))?;
+                    let _ = runtime.block_on(storage.store(
+                        data.clone(),
+                        owner_pk,
+                        owner_keypair.clone(),
+                    ))?;
                     // If Get/Query is performed just after a Store op, half-written data is returned
                     // Adding some delay fixes it
                     thread::sleep(Duration::from_millis(15));
@@ -386,9 +396,9 @@ mod tests {
                 Op::Query(idx) => {
                     // +1 for a chance to get random xor_name
                     let key = get_xor_name(&model, idx % (model.len() + 1));
-                    let query = DataQueryVariant::GetChunk(ChunkAddress(key));
+                    let query = DataQuery::GetChunk(ChunkAddress(key));
                     let user = User::Anyone;
-                    let stored_res = runtime.block_on(storage.query(&query, user));
+                    let stored_res = runtime.block_on(storage.query(query, user));
                     let model_res = model.get(&key);
 
                     match model_res {
@@ -411,7 +421,7 @@ mod tests {
                 Op::Get(idx) => {
                     let key = get_xor_name(&model, idx % (model.len() + 1));
                     let addr = ReplicatedDataAddress::Chunk(ChunkAddress(key));
-                    let stored_data = runtime.block_on(storage.get_from_local_store(&addr));
+                    let stored_data = runtime.block_on(storage.get_from_local_store(addr));
                     let model_data = model.get(&key);
 
                     match model_data {

@@ -23,7 +23,7 @@ use crate::{connections::Session, errors::Error, ClientConfig};
 use sn_dbc::Owner;
 use sn_interface::{
     messaging::{
-        data::{DataQuery, DataQueryVariant, RegisterQuery, ServiceMsg},
+        data::{DataQuery, RegisterQuery, ServiceMsg, TargetedDataQuery},
         ServiceAuth, WireMsg,
     },
     network_knowledge::utils::read_prefix_map_from_disk,
@@ -115,9 +115,9 @@ impl Client {
             // Generate a random query to send a dummy message
             let random_dst_addr = xor_name::rand::random();
             let serialised_cmd = {
-                let msg = ServiceMsg::Query(DataQuery {
-                    adult_index: 0,
-                    variant: DataQueryVariant::Register(RegisterQuery::Get(RegisterAddress {
+                let msg = ServiceMsg::Query(TargetedDataQuery {
+                    target_adult_index: 0,
+                    query: DataQuery::Register(RegisterQuery::Get(RegisterAddress {
                         name: random_dst_addr,
                         tag: 1,
                     })),

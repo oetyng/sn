@@ -176,11 +176,11 @@ impl FileStore {
     /// Opens the log of RegisterCmds for a given register address. Creates a new log if no data is found
     pub(crate) async fn open_log(
         &self,
-        addr: &RegisterAddress,
+        addr: RegisterAddress,
     ) -> Result<(BTreeMap<String, RegisterCmd>, PathBuf)> {
-        let path = self.address_to_filepath(&DataAddress::Register(*addr))?;
+        let path = self.address_to_filepath(&DataAddress::Register(addr))?;
 
-        let map = if self.data_file_exists(&DataAddress::Register(*addr))? {
+        let map = if self.data_file_exists(&DataAddress::Register(addr))? {
             trace!("Register log exists {:?}", path);
             let serialized_data = read(&path)
                 .await

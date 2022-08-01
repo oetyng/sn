@@ -9,6 +9,7 @@
 #![allow(dead_code, unused_imports)]
 
 use crate::comm::{Comm, MsgEvent};
+use crate::data::Data;
 use crate::dbs::UsedSpace;
 use crate::node::{
     cfg::create_test_max_capacity_and_root_storage,
@@ -80,21 +81,22 @@ async fn receive_join_request_without_resource_proof_response() -> Result<()> {
 
             let (section, section_key_share) = create_section(&sk_set, &section_auth)?;
             let node = nodes.remove(0);
+
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
 
             let comm = create_comm().await?;
-
             let node = Node::new(
                 comm.socket_addr(),
                 node.keypair.clone(),
                 section,
                 Some(section_key_share),
                 event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
             let new_node_comm = create_comm().await?;
             let new_node = NodeInfo::new(
@@ -156,6 +158,8 @@ async fn membership_churn_starts_on_join_request_with_resource_proof() -> Result
             let (section, section_key_share) = create_section(&sk_set, &section_auth)?;
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -163,12 +167,12 @@ async fn membership_churn_starts_on_join_request_with_resource_proof() -> Result
                 section,
                 Some(section_key_share),
                 event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
+
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             let new_node = NodeInfo::new(
                 ed25519::gen_keypair(&prefix1.range_inclusive(), MIN_ADULT_AGE),
@@ -252,6 +256,8 @@ async fn membership_churn_starts_on_join_request_from_relocated_node() -> Result
             let relocated_node_old_name = node.name();
             let relocated_node_old_keypair = node.keypair.clone();
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -259,12 +265,12 @@ async fn membership_churn_starts_on_join_request_from_relocated_node() -> Result
                 section,
                 Some(section_key_share),
                 event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
+
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             let relocated_node = NodeInfo::new(
                 ed25519::gen_keypair(&Prefix::default().range_inclusive(), MIN_ADULT_AGE + 1),
@@ -344,6 +350,8 @@ async fn handle_agreement_on_online() -> Result<()> {
             let (section, section_key_share) = create_section(&sk_set, &section_auth)?;
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -351,11 +359,10 @@ async fn handle_agreement_on_online() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
             let new_peer = create_peer(MIN_ADULT_AGE);
 
@@ -418,6 +425,8 @@ async fn handle_agreement_on_online_of_elder_candidate() -> Result<()> {
             let node_name = node.name();
             let section_key_share = create_section_key_share(&sk_set, 0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -425,12 +434,12 @@ async fn handle_agreement_on_online_of_elder_candidate() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
+
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             // Handle agreement on Online of a peer that is older than the youngest
             // current elder - that means this peer is going to be promoted.
@@ -582,6 +591,8 @@ async fn handle_join_request_of_rejoined_node() -> Result<()> {
             let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let info = node_infos.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -589,11 +600,11 @@ async fn handle_join_request_of_rejoined_node() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
             // Make a left peer.
             let peer = create_peer_in_prefix(&prefix, MIN_ADULT_AGE);
@@ -653,6 +664,8 @@ async fn handle_agreement_on_offline_of_non_elder() -> Result<()> {
             let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -660,12 +673,12 @@ async fn handle_agreement_on_offline_of_non_elder() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
+
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             let node_state = NodeState::left(existing_peer, None);
             let proposal = Proposal::Offline(node_state.clone());
@@ -714,6 +727,8 @@ async fn handle_agreement_on_offline_of_elder() -> Result<()> {
             // Create our node
             let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let node = nodes.remove(0);
             let comm = create_comm().await?;
             let node = Node::new(
@@ -722,12 +737,12 @@ async fn handle_agreement_on_offline_of_elder() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
+
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             // Handle agreement on the Offline proposal
             let proposal = Proposal::Offline(remove_node_state.clone());
@@ -790,6 +805,8 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
             let section_key_share = create_section_key_share(&sk_set1, 0);
             let elder = elders.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let mut elder = Node::new(
                 comm.socket_addr(),
@@ -797,8 +814,6 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
                 network_knowledge,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
 
@@ -852,7 +867,8 @@ async fn ae_msg_from_the_future_is_handled() -> Result<()> {
                 .section_keys_provider
                 .insert(create_section_key_share(&sk_set2, 0));
 
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(elder)), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(elder)), comm, data);
 
             let original_bytes = wire_msg.serialize()?;
 
@@ -917,6 +933,8 @@ async fn untrusted_ae_msg_errors() -> Result<()> {
             let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let info = gen_info(MIN_ADULT_AGE, None);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -924,13 +942,12 @@ async fn untrusted_ae_msg_errors() -> Result<()> {
                 our_section.clone(),
                 None,
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
 
             let node = Arc::new(RwLock::new(node));
-            let dispatcher = Dispatcher::new(node.clone(), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(node.clone(), comm, data);
 
             let sender = gen_info(MIN_ADULT_AGE, None);
             let wire_msg = WireMsg::single_src(
@@ -1010,6 +1027,8 @@ async fn relocation(relocated_peer_role: RelocatedPeerRole) -> Result<()> {
             assert!(section.update_member(node_state));
             let node = nodes.remove(0);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let node = Node::new(
                 comm.socket_addr(),
@@ -1017,11 +1036,11 @@ async fn relocation(relocated_peer_role: RelocatedPeerRole) -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_channel::new(TEST_EVENT_CHANNEL_SIZE).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
             let relocated_peer = match relocated_peer_role {
                 RelocatedPeerRole::Elder => *section_auth.elders().nth(1).expect("too few elders"),
@@ -1083,19 +1102,19 @@ async fn msg_to_self() -> Result<()> {
         )
         .await?;
         let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+        let used_space = UsedSpace::new(max_capacity);
 
         let genesis_sk_set = bls::SecretKeySet::random(0, &mut rand::thread_rng());
         let (node, _) = Node::first_node(
             comm.socket_addr(),
             info.keypair.clone(),
             event_sender,
-            UsedSpace::new(max_capacity),
-            root_storage_dir,
             genesis_sk_set,
         )
         .await?;
         let info = node.info();
-        let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+        let data = Data::new(root_storage_dir.as_path(), used_space)?;
+        let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
         let node_msg = SystemMsg::NodeMsgError {
             error: sn_interface::messaging::data::Error::FailedToWriteFile,
@@ -1203,6 +1222,8 @@ async fn handle_elders_update() -> Result<()> {
 
         let (event_sender, mut event_receiver) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
         let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+        let used_space = UsedSpace::new(max_capacity);
+
         let comm = create_comm().await?;
         let mut node = Node::new(
             comm.socket_addr(),
@@ -1210,8 +1231,6 @@ async fn handle_elders_update() -> Result<()> {
             section0.clone(),
             Some(section_key_share),
             event_sender,
-            UsedSpace::new(max_capacity),
-            root_storage_dir,
         )
         .await?;
 
@@ -1220,7 +1239,8 @@ async fn handle_elders_update() -> Result<()> {
         node.section_keys_provider
             .insert(create_section_key_share(&sk_set1, 0));
 
-        let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+        let data = Data::new(root_storage_dir.as_path(), used_space)?;
+        let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
         let cmds = run_and_collect_cmds(Cmd::HandleNewEldersAgreement { new_elders: signed_sap1, sig }, &dispatcher).await?;
 
@@ -1336,6 +1356,8 @@ async fn handle_demote_during_split() -> Result<()> {
             // we make a new full node from info, to see what it does
             let (event_sender, _) = event_channel::new(TEST_EVENT_CHANNEL_SIZE);
             let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
+            let used_space = UsedSpace::new(max_capacity);
+
             let comm = create_comm().await?;
             let mut node = Node::new(
                 comm.socket_addr(),
@@ -1343,8 +1365,6 @@ async fn handle_demote_during_split() -> Result<()> {
                 section,
                 Some(section_key_share),
                 event_sender,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
             )
             .await?;
 
@@ -1361,7 +1381,8 @@ async fn handle_demote_during_split() -> Result<()> {
                     .insert(create_section_key_share(&sk_set_v1_p1, 0));
             }
 
-            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm);
+            let data = Data::new(root_storage_dir.as_path(), used_space)?;
+            let dispatcher = Dispatcher::new(Arc::new(RwLock::new(node)), comm, data);
 
             // Create agreement on `OurElder` for both sub-sections
             let create_our_elders_cmd =

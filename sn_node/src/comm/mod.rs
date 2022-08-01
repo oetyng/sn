@@ -50,7 +50,6 @@ pub(crate) struct Comm {
 }
 
 /// Commands for interacting with Comm.
-#[allow(unused)]
 #[derive(Debug, Clone)]
 pub(crate) enum Cmd {
     #[cfg(feature = "back-pressure")]
@@ -109,7 +108,7 @@ impl Comm {
         Ok((comm, remote_address))
     }
 
-    pub(crate) async fn handle_cmd(&self, cmd: Cmd) {
+    pub(crate) async fn handle(&self, cmd: Cmd) {
         match cmd {
             #[cfg(feature = "back-pressure")]
             Cmd::Regulate { peer, msgs_per_s } => self.regulate(&peer, msgs_per_s).await,
@@ -463,7 +462,7 @@ mod tests {
 
     use sn_interface::{
         messaging::{
-            data::{DataQuery, DataQueryVariant, ServiceMsg},
+            data::{DataQuery, ServiceMsg, TargetedDataQuery},
             AuthKind, Dst, MsgId, ServiceAuth,
         },
         types::{ChunkAddress, Keypair, Peer},
@@ -645,12 +644,10 @@ mod tests {
     fn new_test_msg(dst: Dst) -> Result<WireMsg> {
         let src_keypair = Keypair::new_ed25519();
 
-        let query = DataQueryVariant::GetChunk(ChunkAddress(xor_name::rand::random()));
-        let query = DataQuery {
-            adult_index: 0,
-            variant: query,
-        };
-        let query = ServiceMsg::Query(query);
+        let query = ServiceMsg::Query(TargetedDataQuery {
+            target_adult_index: 0,
+            query: DataQuery::GetChunk(ChunkAddress(xor_name::rand::random())),
+        });
         let payload = WireMsg::serialize_msg_payload(&query)?;
 
         let auth = ServiceAuth {

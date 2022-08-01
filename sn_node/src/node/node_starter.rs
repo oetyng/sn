@@ -6,7 +6,6 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::comm::Comm;
 use crate::node::{
     cfg::keypair_storage::{get_reward_pk, store_network_keypair, store_new_reward_keypair},
     flow_ctrl::{
@@ -21,6 +20,7 @@ use crate::node::{
     Config, Error, Node, RateLimits, Result,
 };
 use crate::UsedSpace;
+use crate::{comm::Comm, data::Data};
 
 use sn_interface::{
     network_knowledge::{utils::read_prefix_map_from_disk, NodeInfo, MIN_ADULT_AGE},
@@ -113,7 +113,7 @@ async fn new_node(
 
         let our_pid = std::process::id();
         let node_prefix = read_only_node.network_knowledge().prefix();
-        let node_name = read_only_node.info().name();
+        let node_name = read_only_node.name();
         let node_age = read_only_node.info().age();
         let our_conn_info = read_only_node.info().addr;
         let our_conn_info_json = serde_json::to_string(&our_conn_info)
@@ -175,8 +175,6 @@ async fn bootstrap_node(
             comm.socket_addr(),
             Arc::new(keypair),
             event_sender.clone(),
-            used_space.clone(),
-            root_storage_dir.to_path_buf(),
             genesis_sk_set,
         )
         .await?;
@@ -260,20 +258,19 @@ async fn bootstrap_node(
             network_knowledge,
             None,
             event_sender.clone(),
-            used_space.clone(),
-            root_storage_dir.to_path_buf(),
         )
         .await?;
 
-        info!("{} Joined the network!", node.info().name());
+        info!("{} Joined the network!", node.name());
         info!("Our AGE: {}", node.info().age());
 
         (node, comm)
     };
 
+    let data = Data::new(root_storage_dir, used_space)?;
     let node = Arc::new(RwLock::new(node));
     let cmd_ctrl = CmdCtrl::new(
-        Dispatcher::new(node.clone(), comm),
+        Dispatcher::new(node.clone(), comm, data),
         monitoring,
         event_sender,
     );

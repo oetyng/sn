@@ -15,19 +15,20 @@ use crate::node::{
     MAX_WAITING_PEERS_PER_QUERY,
 };
 
-use itertools::Itertools;
 use sn_dysfunction::IssueType;
 #[cfg(feature = "traceroute")]
 use sn_interface::messaging::Entity;
 use sn_interface::{
     data_copy_count,
     messaging::{
-        data::{CmdError, DataQuery, MetadataExchange, StorageLevel},
+        data::{CmdError, MetadataExchange, StorageLevel, TargetedDataQuery},
         system::{NodeCmd, NodeQuery, SystemMsg},
-        AuthorityProof, EndUser, MsgId, ServiceAuth,
+        AuthorityProof, MsgId, ServiceAuth,
     },
     types::{log_markers::LogMarker, Peer, PublicKey, ReplicatedData},
 };
+
+use itertools::Itertools;
 use std::{cmp::Ordering, collections::BTreeSet};
 use tracing::info;
 use xor_name::XorName;
@@ -56,14 +57,16 @@ impl Node {
 
     pub(crate) async fn read_data_from_adults(
         &self,
-        query: DataQuery,
+        query: TargetedDataQuery,
         msg_id: MsgId,
         auth: AuthorityProof<ServiceAuth>,
         origin: Peer,
         #[cfg(feature = "traceroute")] traceroute: Vec<Entity>,
     ) -> Result<Vec<Cmd>> {
-        let address = query.variant.address();
-        let operation_id = query.variant.operation_id()?;
+        let target_adult_index = query.target_adult_index;
+        let query = query.query;
+        let address = query.address();
+        let operation_id = query.operation_id()?;
         trace!(
             "{:?} preparing to query adults for data at {:?} with op_id: {:?}",
             LogMarker::DataQueryReceviedAtElder,
@@ -74,7 +77,7 @@ impl Node {
         let targets = self.target_data_holders_including_full(address.name());
 
         // Query only the nth adult
-        let target = if let Some(peer) = targets.into_iter().nth(query.adult_index) {
+        let target = if let Some(peer) = targets.into_iter().nth(target_adult_index) {
             peer
         } else {
             let error = convert_to_error_msg(Error::NoAdults(self.network_knowledge().prefix()));
@@ -112,9 +115,8 @@ impl Node {
         });
 
         let msg = SystemMsg::NodeQuery(NodeQuery::Data {
-            query: query.variant,
+            query,
             auth: auth.into_inner(),
-            origin: EndUser(origin.name()),
             correlation_id: msg_id,
         });
 

@@ -7,6 +7,7 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::dbs::{convert_to_error_msg, Error, FileStore, RegOpStore, Result};
+use crate::UsedSpace;
 
 use sn_interface::{
     messaging::{
@@ -25,7 +26,6 @@ use sn_interface::{
     },
 };
 
-use crate::UsedSpace;
 use bincode::serialize;
 use std::{
     collections::BTreeMap,
@@ -42,7 +42,7 @@ const REG_DB_NAME: &str = "register";
 /// Operations over the data type Register.
 // TODO: dont expose this
 #[derive(Debug, Clone)]
-pub(crate) struct RegisterStorage {
+pub struct RegisterStorage {
     file_db: FileStore,
 }
 
@@ -54,8 +54,8 @@ struct RegisterEntry {
 }
 
 impl RegisterStorage {
-    /// Create new `RegisterStorage`
-    pub(crate) fn new(path: &Path, used_space: UsedSpace) -> Result<Self> {
+    /// Instantiate a new file backed register store.
+    pub fn new(path: &Path, used_space: UsedSpace) -> Result<Self> {
         let file_db = FileStore::new(path.join(REG_DB_NAME), used_space)?;
 
         Ok(Self { file_db })
@@ -72,24 +72,25 @@ impl RegisterStorage {
         Ok(())
     }
 
-    pub(crate) fn keys(&self) -> Vec<DataAddress> {
+    /// Get all DataAddresses of stored data
+    pub fn keys(&self) -> Vec<DataAddress> {
         self.file_db.list_all_data_addresses()
     }
 
     /// Used for replication of data to new Adults.
     pub(crate) async fn get_register_replica(
         &self,
-        address: &RegisterAddress,
+        address: RegisterAddress,
     ) -> Result<ReplicatedRegisterLog> {
         let entry = match self.try_load_register_entry(address).await {
             Ok(entry) => entry,
             Err(Error::KeyNotFound(_key)) => {
-                return Err(Error::NoSuchData(DataAddress::Register(*address)))
+                return Err(Error::NoSuchData(DataAddress::Register(address)))
             }
             Err(e) => return Err(e),
         };
 
-        self.create_replica(*address, entry)
+        self.create_replica(address, entry)
     }
 
     fn create_replica(
@@ -154,7 +155,7 @@ impl RegisterStorage {
         // TODO: make this concurrent
         for addr in all_keys {
             if let DataAddress::Register(key) = addr {
-                match self.try_load_register_entry(&key).await {
+                match self.try_load_register_entry(key).await {
                     Ok(entry) => {
                         let read_only = entry.state.clone();
                         if prefix.matches(read_only.name()) {
@@ -171,7 +172,7 @@ impl RegisterStorage {
     }
 
     /// On receiving data from Elders when promoted.
-    pub(crate) async fn update(&mut self, store_data: RegisterStoreExport) -> Result<()> {
+    pub(crate) async fn update(&self, store_data: RegisterStoreExport) -> Result<()> {
         debug!("Updating Register store");
 
         let RegisterStoreExport(registers) = store_data;
@@ -196,7 +197,7 @@ impl RegisterStorage {
 
     /// --- Writing ---
 
-    pub(crate) async fn write(&mut self, cmd: RegisterCmd) -> Result<()> {
+    pub async fn write(&self, cmd: RegisterCmd) -> Result<()> {
         info!("Writing register cmd: {:?}", cmd);
 
         // rough estimate of the RegisterCmd
@@ -207,7 +208,7 @@ impl RegisterStorage {
         self.apply(cmd).await
     }
 
-    async fn apply(&mut self, cmd: RegisterCmd) -> Result<()> {
+    async fn apply(&self, cmd: RegisterCmd) -> Result<()> {
         let address = cmd.dst_address();
 
         use RegisterCmd::*;
@@ -236,7 +237,7 @@ impl RegisterStorage {
 
                 // init store first, to allow append to happen asap after key insert
                 // could be races, but edge case for later todos.
-                let mut store = self.get_or_create_store(&address).await?;
+                let mut store = self.get_or_create_store(address).await?;
 
                 trace!("Creating new register");
 
@@ -253,7 +254,7 @@ impl RegisterStorage {
 
                 let EditRegister { edit, .. } = op;
 
-                let mut entry = self.try_load_register_entry(&address).await?;
+                let mut entry = self.try_load_register_entry(address).await?;
 
                 info!("Editing Register");
                 entry
@@ -290,7 +291,7 @@ impl RegisterStorage {
 
                 let ExtendRegister { extend_with, .. } = op;
 
-                let mut entry = self.try_load_register_entry(&address).await?;
+                let mut entry = self.try_load_register_entry(address).await?;
                 entry.store.append(cmd, self.file_db.clone()).await?;
 
                 let prev = entry.state.cap();
@@ -310,7 +311,7 @@ impl RegisterStorage {
     /// Temporary helper function which makes sure there exists a Register for the spentbook,
     /// this shouldn't be required once we have a Spentbook data type.
     pub(crate) async fn create_spentbook_register(
-        &mut self,
+        &self,
         address: &RegisterAddress,
         pk: PublicKey,
         keypair: Keypair,
@@ -332,7 +333,7 @@ impl RegisterStorage {
 
     /// --- Reading ---
 
-    pub(crate) async fn read(&self, read: &RegisterQuery, requester: User) -> NodeQueryResponse {
+    pub(crate) async fn read(&self, read: RegisterQuery, requester: User) -> NodeQueryResponse {
         trace!("Reading register {:?}", read.dst_address());
         let operation_id = match read.operation_id() {
             Ok(id) => id,
@@ -343,16 +344,15 @@ impl RegisterStorage {
         trace!("Operation of register read: {:?}", operation_id);
         use RegisterQuery::*;
         match read {
-            Get(address) => self.get(*address, requester, operation_id).await,
-            Read(address) => self.read_register(*address, requester, operation_id).await,
-            GetOwner(address) => self.get_owner(*address, requester, operation_id).await,
+            Get(address) => self.get(address, requester, operation_id).await,
+            Read(address) => self.read_register(address, requester, operation_id).await,
+            GetOwner(address) => self.get_owner(address, requester, operation_id).await,
             GetEntry { address, hash } => {
-                self.get_entry(*address, *hash, requester, operation_id)
-                    .await
+                self.get_entry(address, hash, requester, operation_id).await
             }
-            GetPolicy(address) => self.get_policy(*address, requester, operation_id).await,
+            GetPolicy(address) => self.get_policy(address, requester, operation_id).await,
             GetUserPermissions { address, user } => {
-                self.get_user_permissions(*address, *user, requester, operation_id)
+                self.get_user_permissions(address, user, requester, operation_id)
                     .await
             }
         }
@@ -361,14 +361,14 @@ impl RegisterStorage {
     /// Get `Register` from the store and check permissions.
     async fn get_register(
         &self,
-        address: &RegisterAddress,
+        address: RegisterAddress,
         action: Action,
         requester: User,
     ) -> Result<Register> {
         let entry = match self.try_load_register_entry(address).await {
             Ok(entry) => entry,
             Err(Error::KeyNotFound(_key)) => {
-                return Err(Error::NoSuchData(DataAddress::Register(*address)))
+                return Err(Error::NoSuchData(DataAddress::Register(address)))
             }
             Err(e) => return Err(e),
         };
@@ -388,7 +388,7 @@ impl RegisterStorage {
         requester: User,
         operation_id: OperationId,
     ) -> NodeQueryResponse {
-        let result = match self.get_register(&address, Action::Read, requester).await {
+        let result = match self.get_register(address, Action::Read, requester).await {
             Ok(register) => Ok(register),
             Err(error) => {
                 error!("Error reading register from disk {error:?}");
@@ -405,7 +405,7 @@ impl RegisterStorage {
         requester: User,
         operation_id: OperationId,
     ) -> NodeQueryResponse {
-        let result = match self.get_register(&address, Action::Read, requester).await {
+        let result = match self.get_register(address, Action::Read, requester).await {
             Ok(register) => Ok(register.read()),
             Err(error) => Err(error),
         };
@@ -419,7 +419,7 @@ impl RegisterStorage {
         requester: User,
         operation_id: OperationId,
     ) -> NodeQueryResponse {
-        let result = match self.get_register(&address, Action::Read, requester).await {
+        let result = match self.get_register(address, Action::Read, requester).await {
             Ok(res) => Ok(res.owner()),
             Err(error) => Err(convert_to_error_msg(error)),
         };
@@ -435,7 +435,7 @@ impl RegisterStorage {
         operation_id: OperationId,
     ) -> NodeQueryResponse {
         let result = match self
-            .get_register(&address, Action::Read, requester)
+            .get_register(address, Action::Read, requester)
             .await
             .and_then(|register| register.get(hash).map(|c| c.clone()).map_err(Error::from))
         {
@@ -454,7 +454,7 @@ impl RegisterStorage {
         operation_id: OperationId,
     ) -> NodeQueryResponse {
         let result = match self
-            .get_register(&address, Action::Read, requester)
+            .get_register(address, Action::Read, requester)
             .await
             .and_then(|register| register.permissions(user).map_err(Error::from))
         {
@@ -472,7 +472,7 @@ impl RegisterStorage {
         operation_id: OperationId,
     ) -> NodeQueryResponse {
         let result = match self
-            .get_register(&address, Action::Read, requester_pk)
+            .get_register(address, Action::Read, requester_pk)
             .await
             .map(|register| register.policy().clone())
         {
@@ -488,14 +488,14 @@ impl RegisterStorage {
     // ========================================================================
 
     /// get or create a register op store
-    async fn get_or_create_store(&self, id: &RegisterAddress) -> Result<RegOpStore> {
+    async fn get_or_create_store(&self, id: RegisterAddress) -> Result<RegOpStore> {
         RegOpStore::new(id, self.file_db.clone())
             .await
             .map_err(Error::from)
     }
 
     // gets entry from the cache, or populates cache from disk if expired
-    async fn try_load_register_entry(&self, key: &RegisterAddress) -> Result<RegisterEntry> {
+    async fn try_load_register_entry(&self, key: RegisterAddress) -> Result<RegisterEntry> {
         // read from disk
         let store = self.get_or_create_store(key).await?;
         let mut hydrated_register = None;
@@ -639,7 +639,7 @@ mod test {
     #[tokio::test]
     async fn test_register_write() -> Result<()> {
         // setup store
-        let mut store = new_store()?;
+        let store = new_store()?;
 
         // create register
         let (cmd, authority) = create_register()?;
@@ -648,7 +648,7 @@ mod test {
         // get register
 
         let address = cmd.dst_address();
-        let res = store.read(&RegisterQuery::Get(address), authority).await;
+        let res = store.read(RegisterQuery::Get(address), authority).await;
         match res {
             NodeQueryResponse::GetRegister((Ok(reg), _)) => {
                 assert_eq!(reg.address(), &address, "Should have same address!");
@@ -686,7 +686,7 @@ mod test {
         let for_update = store.get_data_of(prefix).await?;
 
         // create new db and update it with the data from first db
-        let mut new_store = new_store()?;
+        let new_store = new_store()?;
 
         new_store.update(for_update).await?;
         let address = cmd.dst_address();
@@ -702,9 +702,7 @@ mod test {
         );
 
         // should be able to read the same value from this new store also
-        let res = new_store
-            .read(&RegisterQuery::Get(address), authority)
-            .await;
+        let res = new_store.read(RegisterQuery::Get(address), authority).await;
 
         match res {
             NodeQueryResponse::GetRegister((Ok(reg), _)) => {
@@ -720,7 +718,7 @@ mod test {
     #[tokio::test]
     async fn test_register_non_existing_entry() -> Result<()> {
         // setup store
-        let mut store = new_store()?;
+        let store = new_store()?;
 
         // create register
         let (cmd, authority) = create_register()?;
@@ -731,7 +729,7 @@ mod test {
         // try get permissions of random user
         let address = cmd.dst_address();
         let res = store
-            .read(&RegisterQuery::GetEntry { address, hash }, authority)
+            .read(RegisterQuery::GetEntry { address, hash }, authority)
             .await;
         match res {
             NodeQueryResponse::GetRegisterEntry((Err(e), _)) => {
@@ -749,7 +747,7 @@ mod test {
     #[tokio::test]
     async fn test_register_non_existing_permissions() -> Result<()> {
         // setup store
-        let mut store = new_store()?;
+        let store = new_store()?;
 
         // create register
         let (cmd, authority) = create_register()?;
@@ -761,7 +759,7 @@ mod test {
         let address = cmd.dst_address();
         let res = store
             .read(
-                &RegisterQuery::GetUserPermissions { address, user },
+                RegisterQuery::GetUserPermissions { address, user },
                 authority,
             )
             .await;

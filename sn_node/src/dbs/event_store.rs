@@ -23,7 +23,7 @@ pub(crate) struct RegOpStore {
 
 impl RegOpStore {
     /// Create a new event store
-    pub(crate) async fn new(addr: &RegisterAddress, db: FileStore) -> Result<Self> {
+    pub(crate) async fn new(addr: RegisterAddress, db: FileStore) -> Result<Self> {
         let (tree, path) = db.open_log(addr).await?;
         Ok(Self { tree, path })
     }

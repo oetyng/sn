@@ -23,7 +23,7 @@ pub use self::{
     },
     errors::{Error, Result},
     query::DataQuery,
-    query::DataQueryVariant,
+    query::TargetedDataQuery,
     register::{
         CreateRegister, EditRegister, ExtendRegister, RegisterCmd, RegisterQuery,
         SignedRegisterCreate, SignedRegisterEdit, SignedRegisterExtend,
@@ -113,7 +113,7 @@ pub enum ServiceMsg {
     /// Senders should eventually receive either a corresponding [`QueryResponse`] or an error in
     /// reply.
     /// [`QueryResponse`]: Self::QueryResponse
-    Query(DataQuery),
+    Query(TargetedDataQuery),
     /// The response to a query, containing the query result.
     QueryResponse {
         /// The result of the query.
@@ -149,7 +149,7 @@ impl ServiceMsg {
     pub fn dst_address(&self) -> Option<XorName> {
         match self {
             Self::Cmd(cmd) => Some(cmd.dst_name()),
-            Self::Query(query) => Some(query.variant.dst_name()),
+            Self::Query(query) => Some(query.dst_name()),
             _ => None,
         }
     }
@@ -204,7 +204,7 @@ pub enum QueryResponse {
     //
     /// Response to [`GetChunk`]
     ///
-    /// [`GetChunk`]: crate::messaging::data::DataQueryVariant::GetChunk
+    /// [`GetChunk`]: crate::messaging::data::DataQuery::GetChunk
     GetChunk(Result<Chunk>),
     //
     // ===== Register Data =====

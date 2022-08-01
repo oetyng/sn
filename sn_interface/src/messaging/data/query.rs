@@ -16,11 +16,18 @@ use xor_name::XorName;
 
 /// A query for requesting (meta)data at a particular adult.
 #[derive(Hash, Eq, PartialEq, PartialOrd, Clone, Serialize, Deserialize, Debug)]
-pub struct DataQuery {
+pub struct TargetedDataQuery {
     /// The actual query, e.g. retrieving a Chunk or Register
-    pub variant: DataQueryVariant,
+    pub query: DataQuery,
     /// nth closest adult (XOR distance) to query for data
-    pub adult_index: usize,
+    pub target_adult_index: usize,
+}
+
+impl TargetedDataQuery {
+    /// Returns the xorname of the data destination.
+    pub fn dst_name(&self) -> XorName {
+        self.query.dst_name()
+    }
 }
 
 /// Data queries - retrieving data and inspecting their structure.
@@ -31,7 +38,7 @@ pub struct DataQuery {
 /// [`types`]: crate::types
 #[allow(clippy::large_enum_variant)]
 #[derive(Hash, Eq, PartialEq, PartialOrd, Clone, Serialize, Deserialize, Debug)]
-pub enum DataQueryVariant {
+pub enum DataQuery {
     #[cfg(feature = "chunks")]
     /// Retrieve a [`Chunk`] at the given address.
     ///
@@ -50,11 +57,11 @@ pub enum DataQueryVariant {
     Spentbook(SpentbookQuery),
 }
 
-impl DataQueryVariant {
+impl DataQuery {
     /// Creates a Response containing an error, with the Response variant corresponding to the
     /// Request variant.
     pub fn error(&self, error: Error) -> Result<QueryResponse> {
-        use DataQueryVariant::*;
+        use DataQuery::*;
         match self {
             #[cfg(feature = "chunks")]
             GetChunk(_) => Ok(QueryResponse::GetChunk(Err(error))),
@@ -67,7 +74,7 @@ impl DataQueryVariant {
 
     /// Returns the xorname of the data destination for `request`.
     pub fn dst_name(&self) -> XorName {
-        use DataQueryVariant::*;
+        use DataQuery::*;
         match self {
             #[cfg(feature = "chunks")]
             GetChunk(address) => *address.name(),
@@ -82,11 +89,11 @@ impl DataQueryVariant {
     pub fn address(&self) -> ReplicatedDataAddress {
         match self {
             #[cfg(feature = "chunks")]
-            DataQueryVariant::GetChunk(address) => ReplicatedDataAddress::Chunk(*address),
+            DataQuery::GetChunk(address) => ReplicatedDataAddress::Chunk(*address),
             #[cfg(feature = "registers")]
-            DataQueryVariant::Register(read) => ReplicatedDataAddress::Register(read.dst_address()),
+            DataQuery::Register(read) => ReplicatedDataAddress::Register(read.dst_address()),
             #[cfg(feature = "spentbook")]
-            DataQueryVariant::Spentbook(read) => {
+            DataQuery::Spentbook(read) => {
                 ReplicatedDataAddress::Spentbook(SpentbookAddress::new(*read.dst_address().name()))
             }
         }
@@ -99,11 +106,11 @@ impl DataQueryVariant {
     pub fn operation_id(&self) -> Result<OperationId> {
         match self {
             #[cfg(feature = "chunks")]
-            DataQueryVariant::GetChunk(address) => chunk_operation_id(address),
+            DataQuery::GetChunk(address) => chunk_operation_id(address),
             #[cfg(feature = "registers")]
-            DataQueryVariant::Register(read) => read.operation_id(),
+            DataQuery::Register(read) => read.operation_id(),
             #[cfg(feature = "spentbook")]
-            DataQueryVariant::Spentbook(read) => read.operation_id(),
+            DataQuery::Spentbook(read) => read.operation_id(),
         }
     }
 }

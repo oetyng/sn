@@ -22,7 +22,7 @@ use sn_interface::{
         AuthorityProof, MsgId, NodeMsgAuthority, ServiceAuth, WireMsg,
     },
     network_knowledge::{SectionAuthorityProvider, SectionKeyShare},
-    types::{Peer, ReplicatedDataAddress},
+    types::Peer,
 };
 use std::{
     collections::BTreeSet,
@@ -100,6 +100,9 @@ impl CmdJob {
 pub(crate) enum Cmd {
     /// Cleanup node's PeerLinks, removing any unsused, unconnected peers
     CleanupPeerLinks,
+    ///
+    #[allow(dead_code)]
+    HandleEvents(Vec<crate::node::Event>),
     /// Validate `wire_msg` from `sender`.
     /// Holding the WireMsg that has been received from the network,
     ValidateMsg {
@@ -157,15 +160,6 @@ pub(crate) enum Cmd {
     },
     /// Handle a DKG failure that was observed by a majority of the DKG participants.
     HandleDkgFailure(DkgFailureSigSet),
-    /// Send the batch of data messages in a throttled/controlled fashion to the given `recipients`.
-    /// chunks addresses are provided, so that we only retrieve the data right before we send it,
-    /// hopefully reducing memory impact or data replication
-    EnqueueDataForReplication {
-        // throttle_duration: Duration,
-        recipient: Peer,
-        /// Batches of ReplicatedDataAddress to be sent together
-        data_batch: Vec<ReplicatedDataAddress>,
-    },
     /// Performs serialisation and signing and sends the msg.
     SendMsg {
         msg: OutgoingMsg,
@@ -184,9 +178,11 @@ pub(crate) enum Cmd {
     TellEldersToStartConnectivityTest(XorName),
     /// Test Connectivity
     TestConnectivity(XorName),
-    /// Comm Commands
+    /// Comm cmds
     #[allow(unused)]
     Comm(crate::comm::Cmd),
+    /// Data cmds
+    Data(crate::data::Cmd),
 }
 
 impl Cmd {
@@ -232,7 +228,6 @@ impl Cmd {
             TrackNodeIssueInDysfunction { .. } => 9,
             ProposeOffline(_) => 9,
             HandleMembershipDecision(_) => 9,
-            EnqueueDataForReplication { .. } => 9,
             CleanupPeerLinks => 9,
 
             ScheduleDkgTimeout { .. } => 8,
@@ -240,6 +235,8 @@ impl Cmd {
             TestConnectivity(_) => 8,
 
             Comm(_) => 7,
+            HandleEvents(_) => 5,
+            Data(_) => 0,
 
             AddToPendingQueries { .. } => 6,
 
@@ -258,6 +255,7 @@ impl fmt::Display for Cmd {
             Cmd::CleanupPeerLinks => {
                 write!(f, "CleanupPeerLinks")
             }
+            Cmd::HandleEvents(_) => write!(f, "HandleEvents"),
             Cmd::HandleDkgTimeout(_) => write!(f, "HandleDkgTimeout"),
             Cmd::ScheduleDkgTimeout { .. } => write!(f, "ScheduleDkgTimeout"),
             #[cfg(not(feature = "test-utils"))]
@@ -286,7 +284,6 @@ impl fmt::Display for Cmd {
             Cmd::HandleDkgOutcome { .. } => write!(f, "HandleDkgOutcome"),
             Cmd::HandleDkgFailure(_) => write!(f, "HandleDkgFailure"),
             Cmd::SendMsg { .. } => write!(f, "SendMsg"),
-            Cmd::EnqueueDataForReplication { .. } => write!(f, "ThrottledSendBatchMsgs"),
             Cmd::TrackNodeIssueInDysfunction { name, issue } => {
                 write!(f, "TrackNodeIssueInDysfunction {:?}, {:?}", name, issue)
             }
@@ -296,7 +293,8 @@ impl fmt::Display for Cmd {
                 write!(f, "TellEldersToStartConnectivityTest")
             }
             Cmd::TestConnectivity(_) => write!(f, "TestConnectivity"),
-            Cmd::Comm(comm) => write!(f, "Comm({:?})", comm),
+            Cmd::Comm(cmd) => write!(f, "Comm({:?})", cmd),
+            Cmd::Data(cmd) => write!(f, "Data({:?})", cmd),
         }
     }
 }

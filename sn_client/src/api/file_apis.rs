@@ -13,7 +13,7 @@ use super::{
 use crate::{api::data::DataMapLevel, Error, Result};
 
 use sn_interface::{
-    messaging::data::{DataCmd, DataQueryVariant, QueryResponse},
+    messaging::data::{DataCmd, DataQuery, QueryResponse},
     types::{Chunk, ChunkAddress},
 };
 
@@ -94,7 +94,7 @@ impl Client {
         }
 
         let res = self
-            .send_query(DataQueryVariant::GetChunk(ChunkAddress(*name)))
+            .send_query(DataQuery::GetChunk(ChunkAddress(*name)))
             .await?;
 
         let operation_id = res.operation_id;

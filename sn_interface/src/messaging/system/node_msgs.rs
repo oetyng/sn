@@ -7,8 +7,8 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::messaging::{
-    data::{DataQueryVariant, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel},
-    EndUser, MsgId, ServiceAuth,
+    data::{DataQuery, MetadataExchange, OperationId, QueryResponse, Result, StorageLevel},
+    MsgId, ServiceAuth,
 };
 use crate::types::{
     register::{Entry, EntryHash, Permissions, Policy, Register, User},
@@ -35,8 +35,8 @@ pub enum NodeCmd {
     },
     /// Tells an Adult to store a replica of the data
     ReplicateData(Vec<ReplicatedData>),
-    /// Tells an Adult to fetch and replicate data from the sender
-    SendAnyMissingRelevantData(Vec<ReplicatedDataAddress>),
+    /// Tells an Adult to send over data that the sender should have but doesn't.
+    ComplementMissingData(Vec<ReplicatedDataAddress>),
     /// Sent to all promoted nodes (also sibling if any) after
     /// a completed transition to a new constellation.
     ReceiveMetadata {
@@ -68,11 +68,9 @@ pub enum NodeQuery {
     /// Data is handled by Adults
     Data {
         /// The query
-        query: DataQueryVariant,
-        /// Client signature
+        query: DataQuery,
+        /// Client signature (the user that has initiated this query)
         auth: ServiceAuth,
-        /// The user that has initiated this query
-        origin: EndUser,
         /// The correlation id that recorded in Elders for this query
         correlation_id: MsgId,
     },
@@ -88,7 +86,7 @@ pub enum NodeQueryResponse {
     #[cfg(feature = "chunks")]
     /// Response to [`GetChunk`]
     ///
-    /// [`GetChunk`]: crate::messaging::data::DataQueryVariant::GetChunk
+    /// [`GetChunk`]: crate::messaging::data::DataQuery::GetChunk
     GetChunk(Result<Chunk>),
     //
     // ===== Register Data =====

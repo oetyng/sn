@@ -45,9 +45,11 @@ mod comm;
 
 mod dbs;
 
-pub use dbs::UsedSpace;
+pub mod data;
 
 pub mod node;
+
+pub use dbs::UsedSpace;
 
 #[cfg(test)]
 #[ctor::ctor]

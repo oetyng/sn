@@ -30,7 +30,7 @@ use xor_name::{Prefix, XorName};
 impl Node {
     /// Send `AntiEntropyUpdate` message to all nodes in our own section.
     pub(crate) fn send_ae_update_to_our_section(&self) -> Option<Cmd> {
-        let our_name = self.info().name();
+        let our_name = self.name();
         let recipients: BTreeSet<_> = self
             .network_knowledge
             .section_members()
@@ -150,13 +150,13 @@ impl Node {
     ) -> Result<Vec<Cmd>> {
         let snapshot = self.state_snapshot();
 
-        let our_name = self.info().name();
+        let our_name = self.name();
         let signed_sap = SectionAuth {
             value: section_auth.clone(),
             sig: section_signed.clone(),
         };
 
-        let updated = self.network_knowledge.update_knowledge_if_valid(
+        let _updated = self.network_knowledge.update_knowledge_if_valid(
             signed_sap.clone(),
             &proof_chain,
             Some(members),
@@ -164,17 +164,7 @@ impl Node {
             &self.section_keys_provider,
         )?;
 
-        // always run this, only changes will trigger events
-        let mut cmds = self.update_on_elder_change(snapshot).await?;
-
-        // Only trigger reorganize data when there is a membership change happens.
-        if updated && self.is_not_elder() {
-            // only done if adult, since as an elder we dont want to get any more
-            // data for our name (elders will eventually be caching data in general)
-            cmds.push(self.ask_for_any_new_data());
-        }
-
-        Ok(cmds)
+        self.update_on_member_change(snapshot).await
     }
 
     pub(crate) async fn handle_anti_entropy_retry_msg(
@@ -212,7 +202,7 @@ impl Node {
                 self.create_or_wait_for_backoff(&sender).await;
 
                 let mut result = Vec::new();
-                if let Ok(cmds) = self.update_on_elder_change(snapshot).await {
+                if let Ok(cmds) = self.update_on_member_change(snapshot).await {
                     result.extend(cmds);
                 }
 
@@ -314,7 +304,7 @@ impl Node {
             value: section_auth.clone(),
             sig: section_signed.clone(),
         };
-        let our_name = self.info().name();
+        let our_name = self.name();
         let our_section_prefix = self.network_knowledge.prefix();
         let equal_prefix = section_auth.prefix() == our_section_prefix;
         let is_extension_prefix = section_auth.prefix().is_extension_of(&our_section_prefix);
@@ -544,11 +534,9 @@ mod tests {
     use super::*;
 
     use crate::node::{
-        cfg::create_test_max_capacity_and_root_storage,
         flow_ctrl::{event_channel, tests::create_comm},
         MIN_ADULT_AGE,
     };
-    use crate::UsedSpace;
 
     use sn_interface::{
         elder_count,
@@ -689,7 +677,7 @@ mod tests {
                         env.other_sap.clone(),
                         &env.proof_chain,
                         None,
-                        &env.node.info().name(),
+                        &env.node.name(),
                         &env.node.section_keys_provider
                     )?
             );
@@ -821,13 +809,10 @@ mod tests {
             let genesis_pk = genesis_sk_set.public_keys().public_key();
             assert_eq!(genesis_pk, *chain.root_key());
 
-            let (max_capacity, root_storage_dir) = create_test_max_capacity_and_root_storage()?;
             let (mut node, _) = Node::first_node(
                 create_comm().await?.socket_addr(),
                 info.keypair.clone(),
                 event_channel::new(1).0,
-                UsedSpace::new(max_capacity),
-                root_storage_dir,
                 genesis_sk_set.clone(),
             )
             .await?;

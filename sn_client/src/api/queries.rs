@@ -12,7 +12,7 @@ use crate::{connections::QueryResult, errors::Error};
 use sn_interface::{
     data_copy_count,
     messaging::{
-        data::{DataQuery, DataQueryVariant, ServiceMsg},
+        data::{DataQuery, ServiceMsg, TargetedDataQuery},
         ServiceAuth, WireMsg,
     },
     types::{PublicKey, Signature},
@@ -30,7 +30,7 @@ impl Client {
     /// Send a Query to the network and await a response.
     /// Queries are automatically retried using exponential backoff if the timeout is hit.
     #[instrument(skip(self), level = "debug")]
-    pub async fn send_query(&self, query: DataQueryVariant) -> Result<QueryResult, Error> {
+    pub async fn send_query(&self, query: DataQuery) -> Result<QueryResult, Error> {
         self.send_query_with_retry_count(query, MAX_RETRY_COUNT)
             .await
     }
@@ -38,10 +38,7 @@ impl Client {
     /// Send a Query to the network and await a response.
     /// Queries are not retried if the timeout is hit.
     #[instrument(skip(self), level = "debug")]
-    pub async fn send_query_without_retry(
-        &self,
-        query: DataQueryVariant,
-    ) -> Result<QueryResult, Error> {
+    pub async fn send_query_without_retry(&self, query: DataQuery) -> Result<QueryResult, Error> {
         self.send_query_with_retry_count(query, 1.0).await
     }
 
@@ -51,13 +48,13 @@ impl Client {
     #[instrument(skip(self), level = "debug")]
     async fn send_query_with_retry_count(
         &self,
-        query: DataQueryVariant,
+        query: DataQuery,
         retry_count: f32,
     ) -> Result<QueryResult, Error> {
         let client_pk = self.public_key();
-        let mut query = DataQuery {
-            adult_index: 0,
-            variant: query,
+        let mut query = TargetedDataQuery {
+            target_adult_index: 0,
+            query,
         };
 
         let mut rng = rand::rngs::OsRng;
@@ -104,10 +101,10 @@ impl Client {
             attempt += 1.0;
 
             // In the next attempt, try the next adult, further away.
-            query.adult_index += 1;
+            query.target_adult_index += 1;
             // There should not be more than a certain amount of adults holding copies of the data. Retry the closest adult again.
-            if query.adult_index >= data_copy_count() {
-                query.adult_index = 0;
+            if query.target_adult_index >= data_copy_count() {
+                query.target_adult_index = 0;
             }
         }
     }
@@ -117,7 +114,7 @@ impl Client {
     /// provide the serialised and already signed query.
     pub async fn send_signed_query(
         &self,
-        query: DataQuery,
+        query: TargetedDataQuery,
         client_pk: PublicKey,
         serialised_query: Bytes,
         signature: Signature,
