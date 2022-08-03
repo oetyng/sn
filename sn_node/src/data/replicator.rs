@@ -35,7 +35,13 @@ impl ReplicationQueue {
         for data in complementing_data {
             trace!("data being enqueued for replication {:?}", data);
             // -> lock <-
-            let mut guarded_queue = self.queue.lock().unwrap();
+            let mut guarded_queue = match self.queue.lock() {
+                Ok(queue) => queue,
+                Err(error) => {
+                    error!("Apparently, something went wrong on another thread: {error}");
+                    error.into_inner() // we can continue, because what else can we do (this part is probably not even reachable with current code)
+                }
+            };
             if let Some(peers_set) = guarded_queue.get_mut(&data) {
                 debug!("data already queued, adding peer");
                 let _existed = peers_set.insert(recipient);
@@ -54,7 +60,14 @@ impl ReplicationQueue {
         let mut rng = rand::rngs::OsRng;
 
         // -> lock <-
-        let mut guarded_queue = self.queue.lock().unwrap();
+        let mut guarded_queue = match self.queue.lock() {
+            Ok(queue) => queue,
+            Err(error) => {
+                error!("Apparently, something went wrong on another thread: {error}");
+                error.into_inner() // we can continue, because what else can we do (this part is probably not even reachable with current code)
+            }
+        };
+
         let random_queued_data = guarded_queue
             .iter()
             .choose(&mut rng)
@@ -79,5 +92,6 @@ impl ReplicationQueue {
             data_address,
             recipients,
         })
+        // -> end of block, lock released <-
     }
 }
