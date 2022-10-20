@@ -24,7 +24,8 @@ use tokio::sync::RwLock;
 // and the thread waiting to aggregate responses
 #[derive(Debug)]
 pub(super) enum MsgResponse {
-    CmdResponse(SocketAddr, Option<ErrorMsg>),
+    CmdAck(SocketAddr),
+    CmdError(SocketAddr, ErrorMsg),
     QueryResponse(SocketAddr, Box<QueryResponse>),
 }
 

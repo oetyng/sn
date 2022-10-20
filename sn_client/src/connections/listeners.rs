@@ -188,7 +188,7 @@ impl Session {
             } => {
                 debug!("CmdError was received for correlation_id {correlation_id:?}: {error:?}");
 
-                let resp = MsgResponse::CmdResponse(src_addr, Some(error));
+                let resp = MsgResponse::CmdError(src_addr, error);
                 (resp, correlation_id)
             }
             ClientMsg::CmdAck { correlation_id } => {
@@ -197,7 +197,7 @@ impl Session {
                     {correlation_id:?} from {src_addr:?}"
                 );
 
-                let resp = MsgResponse::CmdResponse(src_addr, None);
+                let resp = MsgResponse::CmdAck(src_addr);
                 (resp, correlation_id)
             }
             _ => {
