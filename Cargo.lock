@@ -3949,6 +3949,7 @@ dependencies = [
  "sn_launch_tool",
  "strum",
  "strum_macros",
+ "sysinfo",
  "tempfile",
  "termcolor",
  "thiserror",
