@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
 
     println!("sn_node bins built successfully");
 
-    run_split().await?;
+    start_network_and_upload().await?;
 
     Ok(())
 }
@@ -91,7 +91,7 @@ fn get_node_bin_path(node_path: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 /// Uses SNLT to create a local network of nodes
-pub async fn run_split() -> Result<()> {
+pub async fn start_network_and_upload() -> Result<()> {
     info!("Starting local network");
     let node_path = Some(PathBuf::from("./target/release"));
     let node_path = get_node_bin_path(node_path)?;
@@ -214,13 +214,18 @@ fn store_data_addresses_to_disk(all_data_put: Vec<(XorName, [u8; 32])>) -> Resul
     // =============================================
     // Store the data addresses and hashes to disk.
     // =============================================
-    use std::{fs, io};
+    use std::{
+        fs::{self, File},
+        io::{self, Write},
+    };
     type Error = sn_interface::network_knowledge::Error;
 
     let mut path = dirs_next::home_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Home directory not found"))?;
     path.push(".safe");
     path.push("stored_data");
+
+    println!("Creating {path:?}..");
 
     fs::create_dir_all(&path).map_err(|err| {
         Error::DirectoryHandling(format!(
@@ -230,10 +235,17 @@ fn store_data_addresses_to_disk(all_data_put: Vec<(XorName, [u8; 32])>) -> Resul
         ))
     })?;
 
+    // push the file name
+    path.push("addresses.dat");
+
+    // serialize the collection
     let serialized =
         serde_json::to_vec(&all_data_put).map_err(|e| Error::Serialisation(e.to_string()))?;
 
-    fs::write(&path, serialized).map_err(|e| {
+    println!("Writing addresses to {path:?}..");
+
+    let mut file = File::create(&path)?;
+    file.write_all(&serialized).map_err(|e| {
         Error::FileHandling(format!(
             "Error writing data file at {}: {:?}",
             path.display(),
