@@ -200,7 +200,7 @@ impl WireMsg {
                     msg,
                 })
             }
-            MsgKind::Node(_) => {
+            MsgKind::Node(sender) => {
                 let msg: NodeMsg = rmp_serde::from_slice(&self.payload).map_err(|err| {
                     Error::FailedToParse(format!("Node signed message payload as Msgpack: {}", err))
                 })?;
@@ -209,6 +209,7 @@ impl WireMsg {
                     msg_id: self.header.msg_envelope.msg_id,
                     dst: self.dst,
                     msg,
+                    sender,
                 })
             }
             MsgKind::NodeDataResponse(_) => {
@@ -278,7 +279,8 @@ mod tests {
         let msg = NodeMsg::HandoverAE(100);
 
         let payload = WireMsg::serialize_msg_payload(&msg)?;
-        let kind = MsgKind::Node(Default::default());
+        let sender = Default::default();
+        let kind = MsgKind::Node(sender);
         let wire_msg = WireMsg::new_msg(msg_id, payload, kind, dst);
         let serialized = wire_msg.serialize()?;
 
@@ -296,6 +298,7 @@ mod tests {
                 msg_id: wire_msg.msg_id(),
                 dst,
                 msg,
+                sender,
             }
         );
 

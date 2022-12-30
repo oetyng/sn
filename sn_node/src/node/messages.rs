@@ -8,24 +8,22 @@
 
 use crate::node::{Error, Result};
 
-use sn_interface::{
-    messaging::{system::NodeMsg, Dst, MsgId, MsgKind, WireMsg},
-    network_knowledge::MyNodeInfo,
-};
+use sn_interface::messaging::{system::NodeMsg, Dst, MsgId, MsgKind, WireMsg};
+use xor_name::XorName;
 
 // Utilities for WireMsg.
 pub(crate) trait WireMsgUtils {
     /// Creates a message from single node.
-    fn single_src(node: &MyNodeInfo, dst: Dst, node_msg: NodeMsg) -> Result<WireMsg>;
+    fn single_src(name: XorName, dst: Dst, node_msg: NodeMsg) -> Result<WireMsg>;
 }
 
 impl WireMsgUtils for WireMsg {
     /// Creates a message from single node.
-    fn single_src(node: &MyNodeInfo, dst: Dst, msg: NodeMsg) -> Result<WireMsg> {
+    fn single_src(name: XorName, dst: Dst, msg: NodeMsg) -> Result<WireMsg> {
         let msg_payload =
             WireMsg::serialize_msg_payload(&msg).map_err(|_| Error::InvalidMessage)?;
 
-        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, MsgKind::Node(node.name()), dst);
+        let wire_msg = WireMsg::new_msg(MsgId::new(), msg_payload, MsgKind::Node(name), dst);
 
         Ok(wire_msg)
     }
