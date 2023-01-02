@@ -224,9 +224,9 @@ impl MyNode {
         };
 
         if !allow_startup_joins {
-            // ..otherwise, switch off joins_allowed on a node joining.
-            // TODO: fix racing issues here? https://github.com/maidsafe/safe_network/issues/890
-            self.joins_allowed = false;
+            // // ..otherwise, switch off joins_allowed on a node joining.
+            // // TODO: fix racing issues here? https://github.com/maidsafe/safe_network/issues/890
+            // self.joins_allowed = false;
         }
 
         if let Some((_, sig)) = decision.proposals.iter().max_by_key(|(_, sig)| *sig) {

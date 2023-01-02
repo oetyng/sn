@@ -36,8 +36,8 @@ impl MyNode {
             Proposal::HandoverCompleted(_) => {
                 error!("Handover completed should be handled in a separate blocking fashion");
             }
-            Proposal::JoinsAllowed(joins_allowed) => {
-                self.joins_allowed = joins_allowed;
+            Proposal::JoinsAllowed(_joins_allowed) => {
+                // self.joins_allowed = joins_allowed;
             }
         }
         Ok(cmds)

@@ -217,17 +217,17 @@ impl Dispatcher {
                 debug!("[NODE WRITE]: propose offline write got");
                 node.cast_offline_proposals(&names)
             }
-            Cmd::SetJoinsAllowed(joins_allowed) => {
-                let mut node = self.node.write().await;
-                debug!("[NODE WRITE]: Setting joins allowed..");
-                node.joins_allowed = joins_allowed;
+            Cmd::SetJoinsAllowed(_joins_allowed) => {
+                // let mut node = self.node.write().await;
+                // debug!("[NODE WRITE]: Setting joins allowed..");
+                // node.joins_allowed = joins_allowed;
                 Ok(vec![])
             }
-            Cmd::SetJoinsAllowedUntilSplit(joins_allowed_until_split) => {
-                let mut node = self.node.write().await;
-                debug!("[NODE WRITE]: Setting joins allowed until split..");
-                node.joins_allowed = joins_allowed_until_split;
-                node.joins_allowed_until_split = joins_allowed_until_split;
+            Cmd::SetJoinsAllowedUntilSplit(_joins_allowed_until_split) => {
+                // let mut node = self.node.write().await;
+                // debug!("[NODE WRITE]: Setting joins allowed until split..");
+                // node.joins_allowed = joins_allowed_until_split;
+                // node.joins_allowed_until_split = joins_allowed_until_split;
                 Ok(vec![])
             }
         }
