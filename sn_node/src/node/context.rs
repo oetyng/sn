@@ -107,12 +107,3 @@ impl NodeContext {
         (valid, Token::from_nano(lowest))
     }
 }
-
-pub(super) fn op_cost(network_knowledge: &NetworkKnowledge, data_storage: &DataStorage) -> Token {
-    use sn_interface::{messaging::data::DataCmd, op_cost::required_tokens};
-    let bytes = std::mem::size_of::<DataCmd>();
-    let prefix_len = network_knowledge.prefix().bit_count();
-    let num_storage_nodes = network_knowledge.members().len() as u8;
-    let percent_filled = data_storage.used_space_ratio();
-    required_tokens(bytes, prefix_len, num_storage_nodes, percent_filled)
-}

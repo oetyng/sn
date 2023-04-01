@@ -206,9 +206,7 @@ impl MyNode {
             root_storage_dir,
             keypair,
             reward_secret_key: Arc::new(reward_secret_key),
-            spend_q: SpendQ::with_fee(
-                context::op_cost(&network_knowledge, &data_storage).as_nano(),
-            ),
+            spend_q: SpendQ::with_fee(4000), // hard coded seed value until we have query to other nodes for their avg value
             network_knowledge,
             section_keys_provider,
             dkg_sessions_info: HashMap::default(),
