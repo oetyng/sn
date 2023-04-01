@@ -1444,20 +1444,10 @@ mod tests {
         let dbc_id = secret_key.public_key(); // this is same as dbc.public_key()
         let client = safe.get_safe_client()?;
         let elder_fees = client.get_section_fees(dbc_id, priority).await?;
-        let mut decrypted_fees = vec![];
 
-        for (elder, fee) in elder_fees {
-            match fee.content.decrypt_amount(&secret_key) {
-                Ok(amount) => decrypted_fees.push(amount),
-                Err(_) => Err(crate::Error::DbcReissueError(format!(
-                    "Could not decrypt fee amount sent from {elder}."
-                )))?,
-            }
-        }
-
-        let fee_per_input = decrypted_fees.into_iter()
-            .fold(Some(Token::zero()), |total, fee| {
-                total.and_then(|t| t.checked_add(fee))
+        let fee_per_input = elder_fees.into_iter()
+            .fold(Some(Token::zero()), |total, (_, fee)| {
+                total.and_then(|t| t.checked_add(fee.amount))
             })
             .ok_or_else(|| crate::Error::DbcReissueError(
                 "Overflow occurred while summing the individual Elder's fees in order to calculate the total amount for the output DBCs."

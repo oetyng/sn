@@ -32,8 +32,9 @@ use crate::types::{
 };
 use crate::{messaging::MsgId, types::ReplicatedData};
 
-use serde::{Deserialize, Serialize};
 use sn_dbc::SpentProofShare;
+
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     convert::TryFrom,

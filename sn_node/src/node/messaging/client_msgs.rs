@@ -55,24 +55,16 @@ impl MyNode {
         send_stream: SendStream,
         context: NodeContext,
     ) -> Vec<Cmd> {
-        let response = if let DataQuery::Spentbook(SpendQuery::GetFees { dbc_id, priority }) = query
-        {
+        let response = if let DataQuery::Spentbook(SpendQuery::GetFees { priority, .. }) = query {
             // We receive this directly from client, as an Elder, since `is_spend` is set to true (that is a very
             // messy/confusing pattern, to be fixed).
 
-            // The client is asking for the fee to spend a specific dbc, and including the id of that dbc.
-            // The required fee content is encrypted to that dbc id, and so only the holder of the dbc secret
-            // key can unlock the contents.
+            // The client is asking for the fee to spend a specific dbc given a priority.
             let amount = context.current_fee(priority).as_nano() as f64 * 1.1;
-            debug!(
-                "Returned amount for priority {priority:?}: {} as u64, {} as f64",
-                amount as u64, amount
-            );
-            let required_fee = RequiredFee::new(
-                Token::from_nano(amount as u64),
-                dbc_id,
-                &context.reward_secret_key,
-            );
+            let required_fee = RequiredFee {
+                amount: Token::from_nano(amount as u64),
+                reward_key: context.reward_secret_key.public_key(),
+            };
 
             NodeQueryResponse::GetFees(Ok(required_fee))
         } else {

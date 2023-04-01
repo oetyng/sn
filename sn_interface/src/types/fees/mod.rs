@@ -8,13 +8,7 @@
 
 /// Flow:
 ///  1. Client informs Elder s/he wishes to spend a dbc, and attaches the dbc id (a `PublicKey`).
-///  2. Elder calculates required fee, and returns to Client.
-///     The required fee consists of the `content` field, and `elder_reward_key_sig` - the Elder signature over it.
-///     A `RequiredFeeContent` has the following fields:
-///       a. `amount_cipher`: `RevealedAmount` (amount, blindfactor) ciphertext encrypted to id of dbc to spend (i.e. its public key).
-///       b. `elder_reward_key`:  Elder's well-known reward public key.
-///  3. Client verifies Elder's signature over `content`.
-///  4. Client decrypts the `amount_cipher` to obtain the fee amount.
+///  2. Elder calculates required fee, and returns that plus the Elder's well-known reward public key to Client.
 ///  5. Client includes necessary Dbc output in the intended spend, with the fee amount, deriving a new dbc id
 ///     using `elder_reward_key` which is used in the Dbc output to denote the new Dbc destined to the Elder.
 ///  6. Client then constructs the `FeeCiphers`to be included in the `Spend` request.
@@ -43,43 +37,22 @@
 mod errors;
 mod fee_ciphers;
 mod priority;
-mod required_fee;
-mod required_fee_content;
 mod spend_queue;
 
 pub use self::{
     errors::{Error, Result},
     fee_ciphers::FeeCiphers,
     priority::SpendPriority,
-    required_fee::RequiredFee,
-    required_fee_content::RequiredFeeContent,
     spend_queue::{SpendQ, SpendQSnapshot, SpendQStats},
 };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_matches::assert_matches;
-    use sn_dbc::Token;
+use serde::{Deserialize, Serialize};
+use sn_dbc::Token;
 
-    #[tokio::test]
-    async fn required_fee_can_be_read_by_client() -> Result<()> {
-        let dbc_secret = bls::SecretKey::random();
-        let reward_key_secret = bls::SecretKey::random();
-
-        let fee = Token::from_nano(1234);
-        let required_fee = RequiredFee::new(fee, &dbc_secret.public_key(), &reward_key_secret);
-
-        // verify required fee is correctly signed
-        let fee_sig_verification = required_fee.verify();
-        assert_matches!(fee_sig_verification, Ok(()));
-
-        // verify client can read the amount
-        let decryption_result = required_fee.content.decrypt_amount(&dbc_secret);
-        assert_matches!(decryption_result, Ok(amount) => {
-            assert_eq!(amount, fee);
-        });
-
-        Ok(())
-    }
+/// An Elder responds to a Client who wishes to spend a dbc,
+/// informing the Client of the required fee for the spend.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RequiredFee {
+    pub amount: Token,
+    pub reward_key: bls::PublicKey,
 }

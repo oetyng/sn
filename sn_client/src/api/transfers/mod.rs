@@ -173,33 +173,11 @@ pub async fn select_inputs(
                 continue;
             }
 
-            // Fees that were not encrypted to us.
-            let mut invalid_fees = BTreeSet::new();
-            // As the Elders encrypt the amount to our public key, we need to decrypt it.
-            let mut decrypted_elder_fees = vec![];
-
-            for (elder, fee) in elder_fees {
-                match fee.content.decrypt_amount(&revealed_bearer.secret_key) {
-                    Ok(amount) => decrypted_elder_fees.push(((elder, fee), amount)),
-                    Err(error) => {
-                        error!("Decrypting the fee content from {elder} failed! {error}");
-                        let _ = invalid_fees.insert(fee.content.elder_reward_key);
-                    }
-                }
-            }
-
-            let max_invalid_fees = elder_count() - required_responses;
-            if invalid_fees.len() > max_invalid_fees {
-                let valid_responses = num_responses - invalid_fees.len();
-                warn!("Not enough valid fees received from the section to spend the input. Found: {valid_responses}, needed: {required_responses}", );
-                continue;
-            }
-
             // Total fee paid to all recipients in the section for this input.
-            let fee_per_input = decrypted_elder_fees
+            let fee_per_input = elder_fees
                 .iter()
                 .fold(Some(Token::zero()), |total, (_, fee)| {
-                    total.and_then(|t| t.checked_add(*fee))
+                    total.and_then(|t| t.checked_add(fee.amount))
                 })
                 .ok_or_else(|| Error::DbcReissueError(
                     "Overflow occurred while summing the individual Elder's fees in order to calculate the total amount for the output DBCs."
@@ -209,16 +187,12 @@ pub async fn select_inputs(
             let mut fee_cipher_params = BTreeMap::new();
 
             // Add elders to outputs and generate their fee ciphers.
-            decrypted_elder_fees
-                .iter()
-                .for_each(|((elder, required_fee), fee)| {
-                    let owner = Owner::from(required_fee.content.elder_reward_key);
-                    let owner_once = OwnerOnce::from_owner_base(owner, &mut rng);
-                    outputs.push((*fee, owner_once.clone()));
-
-                    let _ =
-                        fee_cipher_params.insert(elder.name(), (required_fee.clone(), owner_once));
-                });
+            elder_fees.iter().for_each(|(elder, fee)| {
+                let owner = Owner::from(fee.reward_key);
+                let owner_once = OwnerOnce::from_owner_base(owner, &mut rng);
+                outputs.push((fee.amount, owner_once.clone()));
+                let _ = fee_cipher_params.insert(elder.name(), (fee.clone(), owner_once));
+            });
 
             let _ = all_fee_cipher_params.insert(input_key, fee_cipher_params);
 
@@ -454,10 +428,7 @@ fn fee_ciphers(
     let mut input_fee_ciphers = BTreeMap::new();
     for (elder_name, (required_fee, owner_once)) in fee_cipher_params {
         // Encrypt the index to the _well-known reward key_.
-        let derivation_index_cipher = required_fee
-            .content
-            .elder_reward_key
-            .encrypt(owner_once.derivation_index);
+        let derivation_index_cipher = required_fee.reward_key.encrypt(owner_once.derivation_index);
 
         let output_owner_pk = owner_once.as_owner().public_key();
         let revealed_amount = outputs
